@@ -54,10 +54,17 @@
       height:var(--topbar-h);
       display:flex; align-items:center; gap:12px
     }
-    .topbar img{height:100%; width:auto} /* logo fills full header height */
+    .topbar img{height:100%; width:auto} /* logos fill full header height */
     .brand-title{font-weight:700; font-size:clamp(16px,2.6vw,20px); line-height:1.2}
     .brand-sub{font-size:clamp(12px,2vw,14px); opacity:.9}
-    .header-actions{margin-left:auto}
+
+    /* RIGHT SIDE: Reset + Crescendo logo */
+    .header-actions{
+      margin-left:auto;
+      display:flex;           /* NEW: flex row for button + logo */
+      align-items:center;
+      gap:12px;
+    }
     .btn-reset{padding:8px 12px; border-radius:8px; border:1px solid #cfe0f3; background:#f7fbff; color:#0c3963; cursor:pointer; font-weight:600}
 
     /* Progress strip right below header */
@@ -198,9 +205,46 @@
     .m-err{color:#b42318}
   </style>
 
-  <!-- OCR + Geo -->
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.2.0/turf.min.js"></script>
+  <!-- OCR + Geo (cache-busted) -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js?v=20250817"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.2.0/turf.min.js?v=20250817"></script>
+
+  <!-- Patch Tesseract to ALWAYS use array paths (kills x.map crash in any code path) -->
+  <script>
+    (function(){
+      // Defaults (primary jsDelivr; fallback defined later)
+      window.__OCR_PRIMARY__ = {
+        name:"jsDelivr",
+        workerPath:'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+        corePath:['https://cdn.jsdelivr.net/npm/tesseract.js-core@5'],
+        langPath:['https://cdn.jsdelivr.net/npm/@tesseract.js-data']
+      };
+      window.__OCR_FALLBACK__ = {
+        name:"unpkg",
+        workerPath:'https://unpkg.com/tesseract.js@5/dist/worker.min.js',
+        corePath:['https://unpkg.com/tesseract.js-core@5'],
+        langPath:['https://unpkg.com/@tesseract.js-data']
+      };
+      window.CDN_CURRENT = Object.assign({}, window.__OCR_PRIMARY__);
+
+      const arr = x => Array.isArray(x) ? x : [x];
+      if (window.Tesseract && Tesseract.createWorker) {
+        const _orig = Tesseract.createWorker;
+        Tesseract.createWorker = function patchedCreateWorker(opts = {}) {
+          const o = {...opts};
+          if (!o.workerPath) o.workerPath = window.CDN_CURRENT.workerPath;
+          if (!o.corePath)   o.corePath   = window.CDN_CURRENT.corePath;
+          if (!o.langPath)   o.langPath   = window.CDN_CURRENT.langPath;
+          o.corePath = arr(o.corePath);
+          o.langPath = arr(o.langPath);
+          // DO NOT pass logger into the worker init to avoid DataCloneError.
+          if (o.logger) delete o.logger;
+          return _orig.call(Tesseract, o);
+        };
+      }
+      window.__arr = arr; // reuse later
+    })();
+  </script>
 </head>
 <body>
 
@@ -213,8 +257,18 @@
           <div class="brand-title">Municipal Corporation of Greater Mumbai</div>
           <div class="brand-sub">Abandoned Vehicles – Identification & Pre-Notice (Marshal Upload)</div>
         </div>
+
         <div class="header-actions">
           <button id="btnReset" class="btn-reset" title="Clear data & restart">Reset</button>
+          <!-- Crescendo logo on the right (full header height) -->
+          <img
+            src="./data/Crescendo%20Logo.png"
+            alt="Crescendo Innovative Solutions LLP"
+            title="Crescendo Innovative Solutions LLP"
+            loading="eager"
+            decoding="async"
+            style="height:100%; width:auto;"
+          />
         </div>
       </div>
     </div>
@@ -371,18 +425,9 @@ const GEOJSON_WARDS_URL  = "./data/wards.geojson";
 const GEOJSON_BEATS_URL  = "./data/beats.geojson";
 const GEOJSON_POLICE_URL = "./data/police_jurisdiction.geojson";
 
-/* ========= CDN endpoints ========= */
-const CDN_PRIMARY = {
-  name: "jsDelivr",
-  corePath:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@5',
-  langPath:   'https://cdn.jsdelivr.net/npm/@tesseract.js-data'
-};
-const CDN_FALLBACK = {
-  name: "unpkg",
-  corePath:   'https://unpkg.com/tesseract.js-core@5',
-  langPath:   'https://unpkg.com/@tesseract.js-data'
-};
-let CDN_CURRENT = {...CDN_PRIMARY};
+/* ========= CDN endpoints (referenced by earlier patch) ========= */
+const CDN_PRIMARY = window.__OCR_PRIMARY__;
+const CDN_FALLBACK = window.__OCR_FALLBACK__;
 let CDN_READY = false;
 
 /* ========= Stage timings & limits ========= */
@@ -448,8 +493,8 @@ const state = {
   timedOut: false
 };
 
-/* ========= Helpers ========= */
-const arr = (x) => Array.isArray(x) ? x : [x];  // normalize to array (used by OCR paths)
+/* ========= Small helpers ========= */
+const arr = window.__arr;
 function setStatus(msg, cls){ els.status.className = 'status ' + (cls||''); els.status.textContent = msg; }
 function kvRow(id, label, value){
   let row = document.getElementById(id);
@@ -536,7 +581,7 @@ function onStageTimeout(i){
   document.getElementById('timeoutTitle').textContent = `Stage Timed Out — ${name}`;
   document.getElementById('timeoutBody').innerHTML = `
     The <strong>${name}</strong> stage exceeded the maximum allowed time of <strong>${limit}</strong>.<br/><br/>
-    <strong>Reason (typical):</strong> network slowness, large/corrupted image, or blocked resources (CDN).<br/><br/>
+    <strong>Reason (typical):</strong> network slowness, large image, or blocked resources (CDN).<br/><br/>
     <strong>Admin:</strong> Huzefa Fakhruddin — <a href="mailto:Care@crescendoits.com">Care@crescendoits.com</a>
   `;
   els.timeoutBackdrop.style.display = 'flex';
@@ -633,7 +678,7 @@ function lookup(lat, lon){
   };
 }
 
-/* ========= CDN CHECK (core + lang only) ========= */
+/* ========= CDN CHECK ========= */
 async function probe(url){
   try{
     const res = await fetch(url, { method:'GET', headers:{ 'Range':'bytes=0-15' }, cache:'no-store', mode:'cors' });
@@ -641,19 +686,18 @@ async function probe(url){
   }catch(e){ return false; }
 }
 async function checkCDN(cdn){
-  const cores = arr(cdn.corePath);
-  let okCore = false;
-  for (const base of cores) {
+  const okWorker = await probe(cdn.workerPath);
+  let okCore=false, okLang=false;
+
+  for(const base of arr(cdn.corePath)){
     const a = await probe(base + '/tesseract-core.wasm.js');
     const b = a ? true : await probe(base + '/tesseract-core-simd.wasm.js');
     if (a || b) { okCore = true; break; }
   }
-  const langs = arr(cdn.langPath);
-  let okLang = false;
-  for (const base of langs) {
+  for(const base of arr(cdn.langPath)){
     if (await probe(base + '/eng/4.0.0/eng.traineddata.gz')) { okLang = true; break; }
   }
-  return okCore && okLang;
+  return okWorker && okCore && okLang;
 }
 function showCDNModal(msg){
   els.cdnBody.innerHTML = `
@@ -666,16 +710,17 @@ async function initCDN(){
   els.cdnPill.textContent = `CDN: Checking ${CDN_CURRENT.name}…`;
   els.cdnPill.className = 'cdn-pill';
   const ok = await checkCDN(CDN_CURRENT);
-  CDN_READY = ok;
   if(ok){
     els.cdnPill.textContent = `CDN: Connected (${CDN_CURRENT.name})`;
     els.cdnPill.className = 'cdn-pill ok';
     setStatus("Maps loaded & CDN ready. Upload an image to begin.", "ok");
+    CDN_READY = true;
   }else{
     els.cdnPill.textContent = `CDN: Unreachable (${CDN_CURRENT.name})`;
     els.cdnPill.className = 'cdn-pill err';
     setStatus("CDN blocked or offline. Open the CDN dialog.", "err");
-    showCDNModal(`Could not reach ${CDN_CURRENT.name} core/lang assets.`);
+    CDN_READY = false;
+    els.cdnBackdrop.style.display = 'flex';
   }
 }
 
@@ -713,7 +758,7 @@ async function runPipeline(file){
     // End Upload
     endStage(0);
 
-    // Stage 2: OCR (main thread)
+    // Stage 2: OCR (explicit worker with SAFE array paths)
     startStage(1);
     setStatus("Running OCR…", "warn");
     state.croppedUrl = cropped;
@@ -721,19 +766,22 @@ async function runPipeline(file){
     els.overlayScanner.style.display = "block";
 
     try {
-      const { data: { text} } = await Tesseract.recognize(
-        state.croppedUrl, 'eng',
-        {
-          corePath: arr(CDN_CURRENT.corePath),
-          langPath: arr(CDN_CURRENT.langPath),
-          logger: m => {
-            if (m?.status) {
-              const pct = Math.round((m.progress || 0) * 100);
-              setStatus(`OCR: ${m.status} ${pct}%`, "warn");
-            }
-          }
-        }
-      );
+      const worker = await Tesseract.createWorker({
+        workerPath: CDN_CURRENT.workerPath,
+        corePath:   CDN_CURRENT.corePath, // already arrays (patched)
+        langPath:   CDN_CURRENT.langPath  // already arrays (patched)
+      });
+      await worker.loadLanguage('eng');
+      await worker.initialize('eng');
+      await worker.setParameters({
+        tessedit_pageseg_mode: 6,
+        tessedit_char_whitelist:
+          "0123456789:/.-,+() APMapm°'\"IndiaMaharashtraMumbaiAndheriVersovaRoadRdWestEastNorthSouth",
+        user_defined_dpi: "200"
+      });
+
+      const { data: { text } } = await worker.recognize(state.croppedUrl);
+      await worker.terminate();
       els.overlayScanner.style.display = "none";
       endStage(1);
 
@@ -757,10 +805,7 @@ async function runPipeline(file){
       } else { state.outside = true; }
       endStage(3);
 
-      if(state.outside){
-        setStatus("Outside MCGM Boundaries — Not allowed.", "err");
-        showOutsideModal(); return;
-      }
+      if(state.outside){ setStatus("Outside MCGM Boundaries — Not allowed.", "err"); showOutsideModal(); return; }
 
       // Stage 5: Review
       startStage(4); setStatus("Ready. Review the results.", "ok"); endStage(4);
@@ -769,7 +814,7 @@ async function runPipeline(file){
       startStage(5); startRedirectCountdown(5);
 
     } catch (e) {
-      console.error("OCR failed:", e);
+      console.error("Worker OCR failed:", e);
       els.overlayScanner.style.display = "none";
       setStatus("OCR could not complete. Tap Retry.", "err");
       onStageTimeout(1);
@@ -826,7 +871,7 @@ document.getElementById('timeoutClose').addEventListener('click', ()=>{ document
 
 document.getElementById('cdnRetry').addEventListener('click', async ()=>{ document.getElementById('cdnBackdrop').style.display='none'; await initCDN(); });
 document.getElementById('cdnUseFallback').addEventListener('click', async ()=>{
-  CDN_CURRENT = {...CDN_FALLBACK};
+  window.CDN_CURRENT = Object.assign({}, CDN_FALLBACK);
   document.getElementById('cdnBackdrop').style.display='none';
   await initCDN();
 });
@@ -842,7 +887,7 @@ document.getElementById('cdnClose').addEventListener('click', ()=>{ document.get
     setStatus("Could not load GeoJSON (check /data paths / CORS).", "err");
   }
   updateStageTimes();
-  await initCDN(); // 🔍 CDN check on load (core+lang)
+  await initCDN(); // check worker/core/lang & set CDN_READY
 })();
 </script>
 </body>
