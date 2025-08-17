@@ -3,101 +3,123 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Municipal Corporation of Greater Mumbai – Marshal Upload</title>
+  <title>Municipal Corporation of Greater Mumbai — Marshal Upload</title>
 
-  <!-- UI unchanged: same classes/sections/labels -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="icon" href="data:;base64,iVBORw0KGgo=" />
   <link rel="stylesheet" href="styles.css" />
 
-  <!-- Tesseract (browser) -->
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-
-  <!-- Config: where GeoJSONs live -->
-  <script>
-    window.GEO = {
-      wards:  "data/wards.geojson",
-      beats:  "data/beats.geojson",
-      police: "data/police_jurisdiction.geojson"
-    };
-    // Cropping: take bottom band (fraction of height)
-    window.CROP_FRACTION = 0.36;  // 36% from bottom; adjust if needed
-  </script>
+  <!-- Tesseract (eng + hin available on jsDelivr) -->
+  <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js"></script>
+  <script defer src="app.js"></script>
 </head>
 <body>
+  <!-- Header -->
   <header class="topbar">
-    <div class="brand">
-      <img src="https://www.mcgm.gov.in/com.mcgm.newframework/images/logo_V1.png" alt="BMC" class="logo">
-      <div class="titles">
-        <h1>Municipal Corporation of Greater Mumbai</h1>
-        <h2>Abandoned Vehicles – Identification &amp; Pre-Notice (Marshal Upload)</h2>
+    <div class="head-inner">
+      <div class="brand">
+        <img class="bmc-logo" src="https://www.mcgm.gov.in/com.mcgm.newframework/images/logo_V1.png" alt="BMC" />
+        <div class="title">
+          <h1>Municipal Corporation of Greater Mumbai</h1>
+          <p>Abandoned Vehicles – Identification &amp; Pre-Notice (Marshal Upload)</p>
+        </div>
+      </div>
+
+      <div class="controls">
+        <div class="btn-pill" id="btnUpload">Upload</div>
+        <div class="btn-pill" id="btnOCR">OCR</div>
+        <div class="btn-pill" id="btnParse">Parse</div>
+        <div class="btn-pill active" id="btnGeo">GeoJSON</div>
+        <div class="btn-pill" id="btnReview">Review</div>
+        <div class="btn-pill" id="btnRedirect">Redirect</div>
+
+        <div class="spacer"></div>
+
+        <label class="ocr-mode">
+          <span>OCR: </span>
+          <select id="ocrMode">
+            <option value="auto" selected>Auto</option>
+            <option value="eng">ENG</option>
+            <option value="hin">HIN</option>
+          </select>
+        </label>
+
+        <button class="reset" id="btnReset">Reset</button>
+
+        <img class="cres-logo" src="data/Crescendo Logo.png" alt="Crescendo" />
       </div>
     </div>
-    <div class="actions">
-      <select id="ocrMode" aria-label="OCR Mode">
-        <option value="auto" selected>OCR: Auto</option>
-        <option value="local">OCR: Local (Tesseract)</option>
-      </select>
-      <button id="btnReset" class="btn">Reset</button>
-    </div>
+    <div class="saffron-line"></div>
   </header>
 
-  <div class="saffron-line top"></div>
-
-  <section class="rail">
-    <div class="chip active" id="stepUpload">Upload</div>
-    <div class="chip" id="stepOcr">OCR</div>
-    <div class="chip" id="stepParse">Parse</div>
-    <div class="chip" id="stepGeo">GeoJSON</div>
-    <div class="chip" id="stepReview">Review</div>
+  <!-- Status strip -->
+  <section class="status-strip">
+    <div id="stageTimes">Upload — 0.0s • OCR — 0.0s • Parse — 0.0s • GeoJSON — 0.0s • Review — 0.0s • Redirect — 0.0s</div>
+    <div class="cdn-chip" id="cdnChip">CDN: v5 (jsDelivr)</div>
   </section>
 
-  <p id="timings" class="timings">Initializing…</p>
-
-  <main class="grid">
-    <section class="panel">
-      <h3>Original Photo (25%)</h3>
-      <div id="drop" class="drop">
-        <input id="file" type="file" accept="image/*" />
-        <p>Tap to choose image<br/><small>or drag &amp; drop (JPG/PNG from GPS Map Camera)</small></p>
+  <main class="layout">
+    <!-- Left column -->
+    <section class="col">
+      <!-- Drop zone / Original -->
+      <div class="card">
+        <div class="card-hd">Original Photo (25%)</div>
+        <div class="card-bd">
+          <div id="dropzone" class="dropzone" tabindex="0" aria-label="Tap to choose image">
+            <input id="fileInput" type="file" accept="image/*" hidden />
+            <div class="dz-help">
+              <strong>Tap to choose image</strong>
+              <div>or drag &amp; drop (JPG/PNG from GPS Map Camera)</div>
+            </div>
+            <img id="originalPreview" class="preview original" alt="" />
+          </div>
+        </div>
       </div>
-      <div id="originalWrap" class="imgWrap hidden">
-        <img id="originalImg" alt="Original" />
+
+      <!-- Cropped overlay -->
+      <div class="card">
+        <div class="card-hd">Cropped Overlay (GPS text)</div>
+        <div class="card-bd">
+          <canvas id="cropCanvas" class="crop-canvas"></canvas>
+          <img id="cropPreview" class="preview crop" alt="" />
+        </div>
       </div>
     </section>
 
-    <section class="panel">
-      <h3>Results</h3>
-      <dl class="results">
-        <dt>Date</dt><dd id="outDate">—</dd>
-        <dt>Time</dt><dd id="outTime">—</dd>
-        <dt>Latitude</dt><dd id="outLat">—</dd>
-        <dt>Longitude</dt><dd id="outLon">—</dd>
-        <dt>Address</dt><dd id="outAddr">—</dd>
-        <dt>Ward</dt><dd id="outWard">—</dd>
-        <dt>Beat No.</dt><dd id="outBeat">—</dd>
-        <dt>Police Station</dt><dd id="outPS">—</dd>
-      </dl>
-    </section>
-
-    <section class="panel">
-      <h3>Cropped Overlay (GPS text)</h3>
-      <canvas id="cropCanvas" class="cropCanvas"></canvas>
+    <!-- Right column -->
+    <section class="col">
+      <div class="card">
+        <div class="card-hd">Results</div>
+        <div class="card-bd results">
+          <dl>
+            <dt>Date</dt><dd id="outDate">—</dd>
+            <dt>Time</dt><dd id="outTime">—</dd>
+            <dt>Latitude</dt><dd id="outLat">—</dd>
+            <dt>Longitude</dt><dd id="outLng">—</dd>
+            <dt>Address</dt><dd id="outAddr" class="mono">—</dd>
+            <dt>Ward</dt><dd id="outWard">—</dd>
+            <dt>Beat No.</dt><dd id="outBeat">—</dd>
+            <dt>Police Station</dt><dd id="outPS">—</dd>
+          </dl>
+        </div>
+      </div>
     </section>
   </main>
 
-  <div id="alert" class="alert hidden"></div>
-
-  <div class="saffron-line bottom"></div>
-
-  <footer class="footer">
-    <p>
-      <strong>Developed by Crescendo Innovative Solutions LLP</strong> ·
-      Admin: <a href="mailto:Care@crescendoits.com" class="saffron">Care@crescendoits.com</a> ·
-      © 2025 Municipal Corporation of Greater Mumbai (MCGM) —
-      <a href="https://www.mcgm.gov.in" target="_blank">www.mcgm.gov.in</a>
-      <span class="build">Build: v2025.08.17.Prod.v11</span>
-    </p>
+  <!-- Footer -->
+  <footer class="foot">
+    <div class="saffron-line top"></div>
+    <div class="foot-inner">
+      <div class="foot-text">
+        <strong>Developed by</strong> Crescendo Innovative Solutions LLP ·
+        <strong>Admin:</strong> Huzefa Fakhruddin —
+        <a class="saffron" href="mailto:Care@crescendoits.com">Care@crescendoits.com</a>
+        · © 2025 Municipal Corporation of Greater Mumbai (MCGM) —
+        <a href="https://www.mcgm.gov.in" target="_blank" rel="noopener">www.mcgm.gov.in</a>
+      </div>
+      <div class="build" id="buildTag">Build: v2025.08.17.Prod.v12</div>
+    </div>
   </footer>
-
-  <script src="app.js"></script>
 </body>
 </html>
