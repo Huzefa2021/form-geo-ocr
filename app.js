@@ -1,9 +1,11 @@
 /* =========================================================
-   MCGM – Marshal Upload Portal : Application Script (app.js)
-   Build: v2025.08.17.Prod.v9 (classic look)
+   MCGM – Marshal Upload Portal : Application Script
+   Build: v2025.08.17.Prod.v9b
+   Changes: rail-info under progress, original 25%,
+   saffron lines via CSS (no code), OCR eng+hin+mar forcing
+   preserved, robust parsers preserved.
    ========================================================= */
 
-/* ---------- Tiny DOM util ---------- */
 function $(id){ if(id && id[0]==='#') id=id.slice(1); return document.getElementById(id); }
 
 /* ---------- OCR CDNs ---------- */
@@ -11,6 +13,10 @@ const OCR_CDNS = [
   { label:"v5 (jsDelivr)", url:"https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" },
   { label:"v5 (unpkg)",    url:"https://unpkg.com/tesseract.js@5/dist/tesseract.min.js" },
   { label:"v4 (fallback)", url:"https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js" },
+];
+const TESS_LANG_PATHS = [
+  "https://tessdata.projectnaptha.com/5",
+  "https://tessdata.projectnaptha.com/4.0.0"
 ];
 function addScript(src){ return new Promise((res,rej)=>{ const s=document.createElement("script"); s.src=src; s.onload=res; s.onerror=rej; document.head.appendChild(s); }); }
 async function loadOCR(){
@@ -30,43 +36,35 @@ const ENTRY={
   address:"entry.1188611077", police:"entry.1555105834"
 };
 const STAGE_LIMITS=[20000,90000,12000,15000,45000,20000];
-const BUILD="v2025.08.17.Prod.v9";
+const BUILD="v2025.08.17.Prod.v9b";
 const MUMBAI_BBOX=[72.60,18.80,73.20,19.50];
 
-/* ---------- OCR Mode (feature flag) ---------- */
-const OCR_MODE_KEY="ocrLangMode"; // 'auto' | 'eng' | 'indic'
+/* ---------- OCR Mode ---------- */
+const OCR_MODE_KEY="ocrLangMode"; // 'auto'|'eng'|'indic'
 function getOCRMode(){ return localStorage.getItem(OCR_MODE_KEY) || "auto"; }
 function setOCRMode(v){ localStorage.setItem(OCR_MODE_KEY, v); }
 
-/* ---------- Elements ---------- */
+/* ---------- Elements & State ---------- */
 const els={
-  ocrMode:$("#ocrMode"),
-  dropCard:$("#dropCard"), drop:$("#drop"), file:$("#file"),
+  ocrMode:$("#ocrMode"), dropCard:$("#dropCard"), drop:$("#drop"), file:$("#file"),
   originalCard:$("#originalCard"), originalImg:$("#originalImg"),
-  overlayCard:$("#overlayCard"), overlayWrap:$("#overlayWrap"),
-  overlayImg:$("#overlayImg"), overlayScanner:$("#overlayScanner"),
-  status:$("#status"), bar:$("#bar"), results:$("#results"),
-  redirectNote:$("#redirectNote"), stageTimes:$("#stageTimes"),
-  ms:[...document.querySelectorAll(".milestones .chip")],
-  appVersion:$("#appVersion"),
+  overlayCard:$("#overlayCard"), overlayImg:$("#overlayImg"), overlayScanner:$("#overlayScanner"),
+  railStatus:$("#railStatus"), bar:$("#bar"), results:$("#results"),
+  redirectNote:$("#redirectNote"), railTimes:$("#railTimes"),
+  ms:[...document.querySelectorAll(".milestones .chip")], appVersion:$("#appVersion"),
+  cdnPill:$("#cdnPill")
 };
-
-/* ---------- State ---------- */
 const state={
   activeRun:0,
   data:{ date:"", time:"", lat:"", lon:"", address:"", WARD:"", BEAT_NO:"", PS_NAME:"" },
   gjIndex:{ wards:null, beats:null, police:null },
   counts:{ wards:0, beats:0, police:0 },
-  stageStart:Array(6).fill(null),
-  stageElapsed:Array(6).fill(0),
-  stageTimeouts:Array(6).fill(null),
-  stageTicker:null,
-  countdownTimer:null,
-  lastPickToken:""
+  stageStart:Array(6).fill(null), stageElapsed:Array(6).fill(0),
+  stageTimeouts:Array(6).fill(null), stageTicker:null, countdownTimer:null, lastPickToken:""
 };
 
 /* ---------- UI helpers ---------- */
-function setStatus(msg,cls){ els.status.className="status "+(cls||""); els.status.textContent=msg; }
+function setStatus(msg,cls){ els.railStatus.className="status "+(cls||""); els.railStatus.textContent=msg; }
 function kvRow(id,label,value){
   let row=$(id);
   if(!row){ row=document.createElement("div"); row.className="kv"; row.id=id; row.innerHTML=`<div class="k">${label}</div><div class="v"></div>`; els.results.appendChild(row); }
@@ -91,8 +89,7 @@ function buildPrefillURL(){
     [ENTRY.lon]:state.data.lon||"",   [ENTRY.lat]:state.data.lat||"",
     [ENTRY.ward]:state.data.WARD||"", [ENTRY.beat]:state.data.BEAT_NO||"",
     [ENTRY.address]:state.data.address||"", [ENTRY.police]:state.data.PS_NAME||"", usp:"pp_url"
-  });
-  return `https://docs.google.com/forms/d/e/${FORM_ID}/viewform?${p.toString()}`;
+  }); return `https://docs.google.com/forms/d/e/${FORM_ID}/viewform?${p.toString()}`;
 }
 function applyChips(i){
   els.ms.forEach((chip,idx)=>{ chip.classList.remove("pending","active","done"); if(idx<i) chip.classList.add("done"); else if(idx===i) chip.classList.add("active"); else chip.classList.add("pending"); });
@@ -102,7 +99,7 @@ function fmt(ms){ return ms>0&&isFinite(ms)?(ms/1000).toFixed(1)+"s":"0.0s"; }
 function currentStageIndex(){ for(let i=0;i<6;i++) if(state.stageStart[i]!==null && state.stageElapsed[i]===0) return i; for(let i=5;i>=0;i--) if(state.stageElapsed[i]>0) return Math.min(i+1,5); return 0; }
 function updateTimes(){
   const names=["Upload","OCR","Parse","GeoJSON","Review","Redirect"];
-  els.stageTimes.textContent=names.map((n,i)=>{ const running=state.stageStart[i]!==null && i===currentStageIndex(); const val=running?Date.now()-state.stageStart[i]:state.stageElapsed[i]; return `${n} — ${fmt(val)}`; }).join(" • ");
+  els.railTimes.textContent=names.map((n,i)=>{ const running=state.stageStart[i]!==null && i===currentStageIndex(); const val=running?Date.now()-state.stageStart[i]:state.stageElapsed[i]; return `${n} — ${fmt(val)}`; }).join(" • ");
 }
 function startStage(i){ for(let k=0;k<i;k++) if(state.stageStart[k]!==null && state.stageElapsed[k]===0) endStage(k); state.stageStart[i]=Date.now(); applyChips(i); if(!state.stageTicker) state.stageTicker=setInterval(updateTimes,200); clearTimeout(state.stageTimeouts[i]); state.stageTimeouts[i]=setTimeout(()=>onStageTimeout(i),STAGE_LIMITS[i]); }
 function endStage(i){ if(state.stageStart[i]!==null && state.stageElapsed[i]===0) state.stageElapsed[i]=Date.now()-state.stageStart[i]; clearTimeout(state.stageTimeouts[i]); updateTimes(); }
@@ -155,29 +152,20 @@ function enhanceWithCV(canvas){
     const gray = new cv.Mat(); cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
     cv.equalizeHist(gray, gray);
     const blur = new cv.Mat(); cv.GaussianBlur(gray, blur, new cv.Size(3,3), 0, 0, cv.BORDER_DEFAULT);
-
-    const bin1 = new cv.Mat(); // adaptive
-    cv.adaptiveThreshold(blur, bin1, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 21, 10);
-    const bin2 = new cv.Mat(); // Otsu
-    cv.threshold(blur, bin2, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
-
+    const bin1 = new cv.Mat(); cv.adaptiveThreshold(blur, bin1, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 21, 10);
+    const bin2 = new cv.Mat(); cv.threshold(blur, bin2, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
     const m1 = cv.mean(bin1)[0], m2 = cv.mean(bin2)[0];
     let best = m1>=m2 ? bin1 : bin2;
-
-    const hist = new cv.Mat();
-    cv.calcHist([best], [0], new cv.Mat(), hist, [256], [0,256]);
+    const hist = new cv.Mat(); cv.calcHist([best], [0], new cv.Mat(), hist, [256], [0,256]);
     let cum=0, medianIdx=0, total=cv.countNonZero(best);
     for(let i=0;i<256;i++){ cum+=hist.data32F[i]; if(cum>=total/2){ medianIdx=i; break; } }
     if (medianIdx < 127) { const inv=new cv.Mat(); cv.bitwise_not(best, inv); best.delete(); best=inv; }
     hist.delete();
-
     const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(2,2));
     cv.morphologyEx(best, best, cv.MORPH_CLOSE, kernel);
     cv.GaussianBlur(best, best, new cv.Size(3,3), 0, 0, cv.BORDER_DEFAULT);
-
     cv.imshow(canvas, best);
     const url = canvas.toDataURL("image/png");
-
     src.delete(); gray.delete(); blur.delete(); bin1.delete(); bin2.delete(); best.delete(); kernel.delete();
     return url;
   }catch(e){ return null; }
@@ -199,14 +187,12 @@ function enhanceWithCanvas(canvas){
   if(mean<127){ for(let i=0;i<d2.length;i+=4){ d2[i]=255-d2[i]; d2[i+1]=255-d2[i+1]; d2[i+2]=255-d2[i+2]; } ctx.putImageData(img2,0,0); }
   return canvas.toDataURL("image/png");
 }
-/* Returns {displayUrl, ocrUrl} */
 async function cropOverlay(dataURL){
   const bands=[0.45,0.40,0.36,0.32];
   let best=null, bestMean=-1;
   for(const f of bands){
     const c = await cropToBand(dataURL, f);
-    let url = enhanceWithCV(c);
-    if(!url) url = enhanceWithCanvas(c);
+    let url = enhanceWithCV(c); if(!url) url = enhanceWithCanvas(c);
     const ctx=c.getContext("2d");
     const img=ctx.getImageData(0,0,c.width,c.height).data;
     let sum=0; for(let i=0;i<img.length;i+=4) sum+=img[i];
@@ -216,170 +202,116 @@ async function cropOverlay(dataURL){
   return best;
 }
 
-/* ---------- Address & Coordinates ---------- */
-function cleanAddressBasic(a){
-  a=String(a||"");
-  a=a.replace(/\b[\w]{3,}\+[\w]{2,}\b/gi," ");
-  a=a.replace(/(?:GPS|Map|Camera|Wind|Humidity|Pressure|Temperature|Google).*/i," ");
-  a=a.replace(/[^0-9A-Za-z\u0900-\u097F ,./\-]/g," ");
-  a=a.replace(/\s{2,}/g," ").replace(/\s*,\s*/g,", ").replace(/,\s*,/g,", ").replace(/^\s*,\s*|\s*,\s*$/g,"");
-  a=a.replace(/,?\s*India\s*,\s*India/i,", India").trim();
-  return a;
-}
-const STREET_KEYS=["road","rd","lane","ln","marg","nagar","society","chawl","bldg","building","sector","plot","opp","opposite","near","behind","east","west","north","south","estate","industrial","midc","central","marol","andheri","santacruz","vakola","khar"];
-const CITY_KEYS=["mumbai","thane","navi mumbai","maharashtra","india"];
-function latinRatio(s){ const en=(s.match(/[A-Za-z]/g)||[]).length; const dev=(s.match(/[\u0900-\u097F]/g)||[]).length; const tot=en+dev; return tot?en/tot:1; }
-function looksUsefulSeg(s){
-  const t=s.trim();
-  if(!t) return false;
-  if(/^(?:joey|wind|humidity|pressure|temperature)\b/i.test(t)) return false;
-  if(/^\d{8,}$/.test(t)) return false;
-  if(/^(?:[A-Za-z]\s+){3,}$/.test(t)) return false;
-  return true;
-}
-function scoreSegment(s){
-  const t=s.toLowerCase(); let score=0;
-  if(/\b[1-9]\d{5}\b/.test(t)) score+=50;
-  if(CITY_KEYS.some(k=>t.includes(k))) score+=25;
-  for(const k of STREET_KEYS) if(new RegExp(`\\b${k}\\b`).test(t)) score+=5;
-  if(latinRatio(t)>0.75) score+=10;
-  if(t.length>25) score+=6;
-  return score;
-}
-
-/* Robust lat/lon with timezone guard */
+/* ---------- Robust lat/lon + Address ---------- */
 function extractCoords(rawText){
-  let norm=String(rawText||"").replace(/\u00A0|\u2009|\u2002|\u2003/g," ").replace(/[°]/g,"").replace(/O/g,"0");
-  norm=norm.replace(/(\d)[Il|]([0-9])/g,"$11$2").replace(/(\d)[Il|]([.,:]\d)/g,(m,a,b)=>`${a}1${b}`).replace(/(\d)[Ss]([0-9])/g,"$15$2").replace(/(\d)[Bb]([0-9])/g,"$18$2");
-  const cleanNum=s=>s.replace(/[,:\s]/g,"."); const numRe=/[+-]?\d{1,3}(?:[.,:]\d{2,7})/g;
+  const raw = String(rawText || "");
+  let norm = raw.replace(/\u00A0|\u2009|\u2002|\u2003/g, " ").replace(/[°º]/g, " ").replace(/O/g, "0");
+  const lines = norm.split(/\n+/);
 
-  let lat="",lon="",m=norm.match(/Lat(?:itude)?[^0-9+-]*([+-]?\d{1,2}[.,:]\d{1,7})[^0-9+-]{0,40}Lon(?:g(?:itude)?)?[^0-9+-]*([+-]?\d{1,3}[.,:]\d{1,7})/i);
-  if(m){ lat=cleanNum(m[1]); lon=cleanNum(m[2]); }
-  if(!(lat&&lon)){ m=norm.match(/Lon(?:g(?:itude)?)?[^0-9+-]*([+-]?\d{1,3}[.,:]\d{1,7})[^0-9+-]{0,40}Lat(?:itude)?[^0-9+-]*([+-]?\d{1,2}[.,:]\d{1,7})/i); if(m){ lon=cleanNum(m[1]); lat=cleanNum(m[2]); } }
+  const firstNum = (s) => {
+    let t = s.replace(/[^\d+\-.,:\s]/g, "");
+    t = t.replace(/,/g, ".").replace(/:+/g, ".");
+    const m = t.match(/[+\-]?\d{1,3}(?:\.\d{1,8})?/);
+    return m ? parseFloat(m[0]) : NaN;
+  };
 
-  const okLat=v=>isFinite(v)&&v>=-90&&v<=90, okLon=v=>isFinite(v)&&v>=-180&&v<=180;
-  if(lat&&lon){
-    let la=parseFloat(lat), lo=parseFloat(lon);
-    if(okLat(la)&&okLon(lo)&&Math.abs(la-lo)<1e-6) la=NaN;
-    if(okLat(la)&&okLon(lo) && (la>72&&la<73) && (lo>18&&lo<21)){ const t=la; la=lo; lo=t; }
-    return { lat: okLat(la)?String(la):"", lon: okLon(lo)?String(lo):"" };
+  let lat = NaN, lon = NaN;
+  for (const ln of lines) {
+    if (isNaN(lat) && /\bL[aA][tT](?:itude)?\b/i.test(ln))  lat = firstNum(ln);
+    if (isNaN(lon) && /\bLo?n(?:g(?:itude)?)?\b/i.test(ln)) lon = firstNum(ln);
   }
 
-  const matches=[...norm.matchAll(numRe)].map(mm=>{
-    const raw=mm[0], val=parseFloat(cleanNum(raw)), index=mm.index??0;
-    const ctx=norm.slice(Math.max(0,index-8), Math.min(norm.length,index+raw.length+8)).toUpperCase();
-    const nearTZ=/GMT|UTC|\+\s*\d|\-\s*\d/.test(ctx);
-    const hasColon=/:/.test(raw);
-    const looksTime=hasColon && !/Lon|Lat/i.test(ctx) && /\b\d{1,2}:\d{2}\b/.test(raw.replace(/[^\d:]/g,""));
-    return {raw,val,index,nearTZ,looksTime};
-  });
-  const latC=matches.filter(n=>n.val>=-90&&n.val<=90 && !(n.val<=10 && (n.nearTZ||n.looksTime)));
-  const lonC=matches.filter(n=>n.val>=-180&&n.val<=180);
-
-  let best=Infinity,pair=null;
-  for(const la of latC){
-    for(const lo of lonC){
-      const mLat=Math.abs(la.val-19.1), mLon=Math.abs(lo.val-72.9);
-      const tzPenalty=(la.val<=10 && (la.nearTZ||la.looksTime))?50:0;
-      const eqPenalty=(la.val===lo.val)?5:0;
-      const score=mLat+mLon+tzPenalty+eqPenalty;
-      if(score<best){ best=score; pair={la:la.val,lo:lo.val}; }
+  if (!isFinite(lat) || !isFinite(lon)) {
+    const f = (s) => s.replace(/[,:\s]/g, ".");
+    let m = norm.match(/Lat(?:itude)?[^0-9+\-]*([+\-]?\d{1,2}[.,:]\d{1,8})[^0-9+\-]{0,50}Lo?n(?:g(?:itude)?)?[^0-9+\-]*([+\-]?\d{1,3}[.,:]\d{1,8})/i);
+    if (m) { lat = parseFloat(f(m[1])); lon = parseFloat(f(m[2])); }
+    if (!isFinite(lat) || !isFinite(lon)) {
+      m = norm.match(/Lo?n(?:g(?:itude)?)?[^0-9+\-]*([+\-]?\d{1,3}[.,:]\d{1,8})[^0-9+\-]{0,50}Lat(?:itude)?[^0-9+\-]*([+\-]?\d{1,2}[.,:]\d{1,8})/i);
+      if (m) { lon = parseFloat(f(m[1])); lat = parseFloat(f(m[2])); }
     }
   }
-  if(pair){
-    let la=pair.la, lo=pair.lo;
-    if(okLat(la)&&okLon(lo)&&Math.abs(la-lo)<1e-6) la=NaN;
-    if(okLat(la)&&okLon(lo) && (la>72&&la<73) && (lo>18&&lo<21)){ const t=la; la=lo; lo=t; }
-    return { lat: okLat(la)?String(la):"", lon: okLon(lo)?String(lo):"" };
-  }
-  return { lat:"", lon:"" };
+
+  if (isFinite(lat) && isFinite(lon) && (lat > 72 && lat < 73) && (lon > 18 && lon < 21)) { const t = lat; lat = lon; lon = t; }
+  if (!(isFinite(lat) && lat >= -90 && lat <= 90))  lat = NaN;
+  if (!(isFinite(lon) && lon >= -180 && lon <= 180)) lon = NaN;
+
+  return { lat: isFinite(lat) ? String(lat) : "", lon: isFinite(lon) ? String(lon) : "" };
 }
 
-/* Stronger address picker */
 function extractAddress(raw){
-  const text=String(raw||"").replace(/\u00A0|\u2009|\u2002|\u2003/g," ").replace(/[|·•]+/g," ").replace(/\s{2,}/g," ").trim();
-  const lines=text.split(/\n+/).map(s=>s.trim()).filter(Boolean);
-  const latIdx = (()=>{
-    for(let i=lines.length-1;i>=0;i--) if(/\bLat/i.test(lines[i])) return i;
-    return lines.length;
-  })();
-  const candidates=lines.slice(Math.max(0,latIdx-4), latIdx).filter(looksUsefulSeg).map(cleanAddressBasic);
+  const text = String(raw||"").replace(/\u00A0|\u2009|\u2002|\u2003/g," ").replace(/[|·•]+/g," ").replace(/\s{2,}/g," ").trim();
+  const lines = text.split(/\n+/).map(s => s.trim()).filter(Boolean);
 
-  let joined=candidates.join(", ");
-  const indiaIdx=joined.toLowerCase().lastIndexOf("india");
-  if(indiaIdx>0){ joined = joined.slice(0, indiaIdx + "india".length); }
+  let latIdx = lines.length; for(let i=lines.length-1;i>=0;i--) if(/\bLat/i.test(lines[i])) { latIdx = i; break; }
+  const pre = lines.slice(Math.max(0, latIdx-5), latIdx);
 
-  const segs = joined.split(/\s*,\s*/).map(s=>s.trim()).filter(looksUsefulSeg);
-  segs.sort((a,b)=>scoreSegment(b)-scoreSegment(a));
-  const picked = [...new Set(segs.slice(0,6))];
+  const useful = pre.filter(s => {
+    const t=s.trim(); if(!t) return false;
+    if(/^(joey|wind|humidity|pressure|temperature|google)\b/i.test(t)) return false;
+    if(/GMT|UTC|\+\d{1,2}:\d{2}/i.test(t)) return false;
+    const singleCaps = (t.match(/\b[A-Z]\b/g)||[]).length;
+    if(singleCaps >= 5 && t.length < 120) return false;
+    return true;
+  });
 
-  const orderScore = s=>{
-    const t=s.toLowerCase();
-    if(/\b(?:plot|flat|bldg|building|road|rd|lane|ln|marg)\b/.test(t)||/^\d+/.test(t)) return 10;
-    if(/\b(?:nagar|society|estate|midc|industrial|village|sector|marol|andheri|santacruz|vakola|khar)\b/.test(t)) return 8;
-    if(/\bmumbai\b/.test(t)) return 6;
-    if(/\bmaharashtra\b/.test(t)) return 4;
-    if(/\b[1-9]\d{5}\b/.test(t)) return 2;
-    if(/\bindia\b/.test(t)) return 1;
-    return 5;
+  const CITY = ["mumbai","maharashtra","india"];
+  const STREET = ["road","rd","lane","ln","marg","nagar","society","estate","midc","industrial","sector","plot","opp","opposite","near","behind","east","west","north","south","marol","andheri","santacruz","vakola","khar"];
+  const score = (s)=>{
+    const t=s.toLowerCase(); let sc=0;
+    if(/\b[1-9]\d{5}\b/.test(t)) sc+=50;
+    if(CITY.some(k=>t.includes(k))) sc+=25;
+    for(const k of STREET) if(new RegExp(`\\b${k}\\b`).test(t)) sc+=6;
+    if(/[0-9],?/.test(t)) sc+=4;
+    if(t.includes(",")) sc+=3;
+    return sc;
   };
-  picked.sort((a,b)=>orderScore(b)-orderScore(a));
+
+  let segs = useful.join(", ").split(/\s*,\s*/).map(s=>s.trim()).filter(Boolean);
+  segs = segs.filter(s => s.length>2).slice(0,40);
+  segs.sort((a,b)=>score(b)-score(a));
+
+  const seen=new Set(); const picked=[];
+  for(const s of segs){ const key=s.toLowerCase(); if(!seen.has(key)){ seen.add(key); picked.push(s); if(picked.length>=6) break; } }
 
   let addr = picked.join(", ");
-  addr = addr.replace(/(?:\b[A-Za-z]\b\s*){3,}/g," ");
-  addr = addr.replace(/\s{2,}/g," ").replace(/\s*,\s*/g,", ").replace(/,\s*,/g,", ").replace(/^\s*,\s*|\s*,\s*$/g,"");
+  if(/mumbai/i.test(text) && !/mumbai/i.test(addr)) addr = (addr?addr+", ":"") + "Mumbai";
+  if(/maharashtra/i.test(text) && !/maharashtra/i.test(addr)) addr = addr + ", Maharashtra";
   const pin = text.match(/\b[1-9]\d{5}\b/);
-  if(pin && !addr.includes(pin[0])) addr = addr ? `${addr}, ${pin[0]}` : pin[0];
-  if(addr && !/,\s*India$/i.test(addr)) addr = `${addr}, India`;
+  if(pin && !addr.includes(pin[0])) addr = addr + ", " + pin[0];
+  if(addr && !/,\s*India$/i.test(addr)) addr += ", India";
+
+  addr = addr.replace(/\s*,\s*/g,", ").replace(/,\s*,/g,", ").replace(/\s{2,}/g," ").replace(/^\s*,\s*|\s*,\s*$/g,"");
   return addr;
 }
 
-/* ---------- Parsing wrapper ---------- */
-function parseAll(text){
-  const raw=String(text||"").replace(/\u00A0|\u2009|\u2002|\u2003/g," ").replace(/[|·•]+/g," ").replace(/\s{2,}/g," ").trim();
-  const toIsoDate=s=>{ const m=s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/); if(!m) return ""; let [_,d,mo,y]=m; if(y.length===2) y=+y<50?"20"+y:"19"+y; return `${y}-${mo.padStart(2,"0")}-${d.padStart(2,"0")}`; };
-  const to24h=s=>{ s=s.trim().toUpperCase(); const m=s.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/); if(!m) return ""; let h=+m[1],mi=m[2],ap=m[3]||""; if(ap==="PM"&&h<12) h+=12; if(ap==="AM"&&h===12) h=0; return `${String(h).padStart(2,"0")}:${mi}`; };
-  const dt=raw.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}).{0,6}(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i);
-  const date=dt?toIsoDate(dt[1]):""; const time=dt?to24h(dt[2]):"";
-  const { lat, lon } = extractCoords(raw);
-  const address = extractAddress(raw);
-  return { lat, lon, address, date, time };
-}
-
-/* ---------- OCR with mode toggle ---------- */
+/* ---------- OCR ---------- */
 async function ensureV4(){
   if(!window.Tesseract?.recognize){
     await addScript("https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js");
   }
 }
+/* Force eng+hin+mar for Auto/Indic (and explicit langPath) */
 async function ocrRecognize(url){
-  const mode=getOCRMode(); // 'auto' | 'eng' | 'indic'
-  let langHint="eng";
+  const mode=getOCRMode();
+  const lang = (mode === "eng") ? "eng" : "eng+hin+mar";
+  setStatus(`OCR (${lang})…`,"warn");
 
-  if(mode==="indic"){ langHint="eng+hin+mar"; }
-  else if(mode==="auto"){
+  let lastErr=null;
+  for(const langPath of TESS_LANG_PATHS){
     try{
-      const bmp=await createImageBitmap(await (await fetch(url)).blob());
-      const c=document.createElement("canvas");
-      c.width=Math.max(1,Math.floor(bmp.width*0.3));
-      c.height=Math.max(1,Math.floor(bmp.height*0.3));
-      c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);
-      const strip=c.toDataURL("image/png");
-      try{
-        const probe=await Tesseract.recognize(strip,"eng",{ tessedit_pageseg_mode:6, preserve_interword_spaces:1 });
-        if(/[\u0900-\u097F]/.test(probe?.data?.text||"")) langHint="eng+hin+mar";
-      }catch{}
-    }catch{}
+      const {data:{text}}=await Tesseract.recognize(url, lang, {
+        langPath, tessedit_pageseg_mode:6, preserve_interword_spaces:1
+      });
+      return text;
+    }catch(e){ lastErr=e; }
   }
-
+  await ensureV4();
   try{
-    const {data:{text}}=await Tesseract.recognize(url,langHint);
+    const {data:{text}}=await Tesseract.recognize(url, lang, {
+      langPath:"https://tessdata.projectnaptha.com/4.0.0", tessedit_pageseg_mode:6, preserve_interword_spaces:1
+    });
     return text;
-  }catch{
-    await ensureV4();
-    const {data:{text}}=await Tesseract.recognize(url,langHint);
-    return text;
-  }
+  }catch(e){ throw lastErr || e; }
 }
 
 /* ---------- Redirect ---------- */
@@ -405,11 +337,9 @@ function bindDropzone(){
   fi.addEventListener("change",(e)=>{ const f=e.target.files?.[0]; if(!f) return; if(!isAllowedImage(f)){ showModal("Unsupported file","Only image files (JPG, PNG, WEBP, HEIC/HEIF) are allowed."); fi.value=""; return; } const tok=tokenOf(f); if(state.lastPickToken===tok) return; state.lastPickToken=tok; runPipeline(f); });
   $("#btnReset").onclick=()=>location.reload();
 
+  if (!localStorage.getItem(OCR_MODE_KEY)) setOCRMode("indic"); // default first time
   els.ocrMode.value=getOCRMode();
-  els.ocrMode.addEventListener("change",()=>{
-    setOCRMode(els.ocrMode.value);
-    setStatus(`OCR Mode: ${els.ocrMode.value.toUpperCase()}`,"ok");
-  });
+  els.ocrMode.addEventListener("change",()=>{ setOCRMode(els.ocrMode.value); setStatus(`OCR Mode: ${els.ocrMode.value.toUpperCase()}`,"ok"); });
 }
 
 /* ---------- Pipeline ---------- */
@@ -431,16 +361,15 @@ async function runPipeline(file){
     if(myRun!==state.activeRun) return;
     endStage(0);
 
-    startStage(1); setStatus("Running OCR…","warn");
-    els.overlayImg.src=crop.displayUrl; els.overlayScanner.style.display="block";
-
+    startStage(1); els.overlayImg.src=crop.displayUrl; els.overlayScanner.style.display="block";
     let text="";
     try{ text=await ocrRecognize(crop.ocrUrl); }
     catch{ els.overlayScanner.style.display="none"; setStatus("OCR failed. Please Retry.","err"); onStageTimeout(1); return; }
     els.overlayScanner.style.display="none"; endStage(1);
 
     startStage(2); setStatus("Parsing extracted text…","warn");
-    Object.assign(state.data, parseAll(text));
+    const parsed = parseAll(text);
+    Object.assign(state.data, parsed);
     render(); endStage(2);
 
     startStage(3); setStatus("GeoJSON lookup…","warn");
@@ -461,20 +390,24 @@ async function runPipeline(file){
   reader.readAsDataURL(file);
 }
 
+/* ---------- Parse wrapper ---------- */
+function parseAll(text){
+  const raw=String(text||"").replace(/\u00A0|\u2009|\u2002|\u2003/g," ").replace(/[|·•]+/g," ").replace(/\s{2,}/g," ").trim();
+  const toIsoDate=s=>{ const m=s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/); if(!m) return ""; let [_,d,mo,y]=m; if(y.length===2) y=+y<50?"20"+y:"19"+y; return `${y}-${mo.padStart(2,"0")}-${d.padStart(2,"0")}`; };
+  const to24h=s=>{ s=s.trim().toUpperCase(); const m=s.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/); if(!m) return ""; let h=+m[1],mi=m[2],ap=m[3]||""; if(ap==="PM"&&h<12) h+=12; if(ap==="AM"&&h===12) h=0; return `${String(h).padStart(2,"0")}:${mi}`; };
+  const dt=raw.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}).{0,6}(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i);
+  const date=dt?toIsoDate(dt[1]):""; const time=dt?to24h(dt[2]):"";
+  const { lat, lon } = extractCoords(raw);
+  const address = extractAddress(raw);
+  return { lat, lon, address, date, time };
+}
+
 /* ---------- Boot ---------- */
 (async ()=>{
-  initResultSkeleton();
-  bindDropzone();
-  els.appVersion.textContent=BUILD;
-
+  initResultSkeleton(); bindDropzone(); els.appVersion.textContent=BUILD;
   await loadOCR();
-  try{
-    await loadGeo();
-    setStatus(`Maps loaded. W:${state.counts.wards} • B:${state.counts.beats} • PS:${state.counts.police}. Upload an image to begin.`,"ok");
-  }catch{
-    setStatus("Could not load GeoJSON (check /data paths & filenames).","err");
-  }
-
+  try{ await loadGeo(); setStatus(`Maps loaded. W:${state.counts.wards} • B:${state.counts.beats} • PS:${state.counts.police}. Upload an image to begin.`,"ok"); }
+  catch{ setStatus("Could not load GeoJSON (check /data paths & filenames).","err"); }
   updateTimes();
-  applyChips(0);        // classic: show "Upload" active on load
+  applyChips(0); // show initial state
 })();
