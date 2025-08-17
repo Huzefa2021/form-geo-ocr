@@ -1,23 +1,24 @@
 /* =========================================================
    MCGM – Marshal Upload Portal : Application Script
    Build: v2025.08.17.Prod.v10
-   Changes:
-   • OCR is fully automatic: eng+hin (v5) → if Devanagari/weakness detected,
-     auto-upgrade to eng+hin+mar (v4.0.0) with graceful fallbacks.
-   • Load status + counts are shown under the progress bar.
-   • All previous geospatial & parsing hardening retained.
+   Highlights:
+   • Auto OCR with tessdata_best (eng+hin) → upgrade to eng+hin+mar when useful
+   • Numeric ROI pass for clean Lat/Long + Date/Time
+   • Stronger regex & address scorer
    ========================================================= */
 
 function $(id){ if(id && id[0]==='#') id=id.slice(1); return document.getElementById(id); }
 
-/* ---------- OCR CDNs ---------- */
+/* ---------- OCR sources ---------- */
 const OCR_CDNS = [
   { label:"v5 (jsDelivr)", url:"https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" },
   { label:"v5 (unpkg)",    url:"https://unpkg.com/tesseract.js@5/dist/tesseract.min.js" },
   { label:"v4 (fallback)", url:"https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js" },
 ];
-const LANG_PATH_V5  = "https://tessdata.projectnaptha.com/5";       // NOTE: no 'mar' here
-const LANG_PATH_V40 = "https://tessdata.projectnaptha.com/4.0.0";   // includes 'mar'
+// High-accuracy lang data
+const LANG_PATH_BEST = "https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/main";
+const LANG_PATH_V5   = "https://tessdata.projectnaptha.com/5";       // (no mar here)
+const LANG_PATH_40   = "https://tessdata.projectnaptha.com/4.0.0";   // (has mar)
 
 function addScript(src){ return new Promise((res,rej)=>{ const s=document.createElement("script"); s.src=src; s.onload=res; s.onerror=rej; document.head.appendChild(s); }); }
 async function loadOCR(){
@@ -52,8 +53,7 @@ const els={
   overlayCard:$("#overlayCard"), overlayImg:$("#overlayImg"), overlayScanner:$("#overlayScanner"),
   railStatus:$("#railStatus"), bar:$("#bar"), results:$("#results"),
   redirectNote:$("#redirectNote"), railTimes:$("#railTimes"),
-  ms:[...document.querySelectorAll(".milestones .chip")], appVersion:$("#appVersion"),
-  cdnPill:$("#cdnPill")
+  ms:[...document.querySelectorAll(".milestones .chip")], appVersion:$("#appVersion")
 };
 const state={
   activeRun:0,
@@ -158,7 +158,6 @@ function enhanceWithCV(canvas){
     const m1 = cv.mean(bin1)[0], m2 = cv.mean(bin2)[0];
     let best = m1>=m2 ? bin1 : bin2;
 
-    // auto invert if needed
     const hist = new cv.Mat();
     cv.calcHist([best], [0], new cv.Mat(), hist, [256], [0,256]);
     let cum=0, medianIdx=0, total=cv.countNonZero(best);
@@ -212,7 +211,7 @@ async function cropOverlay(dataURL){
 /* ---------- Script detection ---------- */
 function hasDevanagari(str){ return /[\u0900-\u097F]/.test(String(str||"")); }
 
-/* ---------- Robust lat/lon + Address ---------- */
+/* ---------- Parsing Hardening ---------- */
 function extractCoords(rawText){
   const raw = String(rawText || "");
   let norm = raw.replace(/\u00A0|\u2009|\u2002|\u2003/g, " ").replace(/[°º]/g, " ").replace(/O/g, "0");
@@ -241,16 +240,22 @@ function extractCoords(rawText){
     }
   }
 
+  // Swap if they're reversed (common OCR issue)
   if (isFinite(lat) && isFinite(lon) && (lat > 72 && lat < 73) && (lon > 18 && lon < 21)) { const t = lat; lat = lon; lon = t; }
   if (!(isFinite(lat) && lat >= -90 && lat <= 90))  lat = NaN;
   if (!(isFinite(lon) && lon >= -180 && lon <= 180)) lon = NaN;
 
   return { lat: isFinite(lat) ? String(lat) : "", lon: isFinite(lon) ? String(lon) : "" };
 }
+function extractDateTime(raw){
+  const toIsoDate=s=>{ const m=s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/); if(!m) return ""; let [_,d,mo,y]=m; if(y.length===2) y=+y<50?"20"+y:"19"+y; return `${y}-${mo.padStart(2,"0")}-${d.padStart(2,"0")}`; };
+  const to24h=s=>{ s=s.trim().toUpperCase(); const m=s.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/); if(!m) return ""; let h=+m[1],mi=m[2],ap=m[3]||""; if(ap==="PM"&&h<12) h+=12; if(ap==="AM"&&h===12) h=0; return `${String(h).padStart(2,"0")}:${mi}`; };
+  const m = String(raw||"").match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}).{0,8}(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i);
+  return { date: m?toIsoDate(m[1]):"", time: m?to24h(m[2]):"" };
+}
 function extractAddress(raw){
   const text = String(raw||"").replace(/\u00A0|\u2009|\u2002|\u2003/g," ").replace(/[|·•]+/g," ").replace(/\s{2,}/g," ").trim();
   const lines = text.split(/\n+/).map(s => s.trim()).filter(Boolean);
-
   let latIdx = lines.length; for(let i=lines.length-1;i>=0;i--) if(/\bLat/i.test(lines[i])) { latIdx = i; break; }
   const pre = lines.slice(Math.max(0, latIdx-5), latIdx);
 
@@ -293,69 +298,70 @@ function extractAddress(raw){
   return addr;
 }
 
-/* ---------- OCR (auto with Marathi upgrade when useful) ---------- */
-async function ocrAuto(imageUrl){
-  // 1) Fast path: v5 with eng(+hin)
-  const langFast = "eng+hin";
-  setStatus(`OCR (${langFast} via v5)…`,"warn");
+/* ---------- OCR helpers ---------- */
+async function ocrWith(imageUrl, lang, langPath, params={}){
+  const options = {
+    langPath, tessedit_pageseg_mode: 6, preserve_interword_spaces: 1,
+    ...params
+  };
+  const { data:{ text="" }={} } = await Tesseract.recognize(imageUrl, lang, options);
+  return text;
+}
+
+// Bottom ROI numeric-only pass (for coords & time)
+async function ocrNumericROI(sourceUrl){
+  const bmp = await createImageBitmap(await (await fetch(sourceUrl)).blob());
+  const W=bmp.width, H=bmp.height, roiH=Math.max(80, Math.round(H*0.30));
+  const c=document.createElement("canvas"); c.width=W; c.height=roiH;
+  const ctx=c.getContext("2d",{willReadFrequently:true}); ctx.drawImage(bmp, 0, H-roiH, W, roiH, 0, 0, W, roiH);
+  // quick enhance
+  const img=ctx.getImageData(0,0,W,roiH), d=img.data; for(let i=0;i<d.length;i+=4){ const y=(d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114); const v=y>150?255:0; d[i]=d[i+1]=d[i+2]=v; } ctx.putImageData(img,0,0);
+  const roiUrl=c.toDataURL("image/png");
   try{
-    const res = await Tesseract.recognize(imageUrl, langFast, {
-      langPath: LANG_PATH_V5,
-      tessedit_pageseg_mode: 6,
-      preserve_interword_spaces: 1
+    const text = await ocrWith(roiUrl, "eng", LANG_PATH_BEST, {
+      tessedit_char_whitelist: "0123456789:+-. LatLngGMT/PMAM",
+      user_defined_dpi: 300
     });
-    let text = res?.data?.text || "";
+    return text;
+  }catch{ return ""; }
+}
 
-    // Decide whether to upgrade: Devanagari present OR no coords found
-    const needUpgrade = hasDevanagari(text) || !extractCoords(text).lat || !extractCoords(text).lon;
+// Auto pipeline: best → upgrade to mar if needed; plus numeric ROI fusion
+async function ocrAutoFull(overlayUrl){
+  // Pass A: best (eng+hin) on v5 path is fast, but we go straight to best for quality
+  setStatus(`OCR (eng+hin · tessdata_best)…`,"warn");
+  let text = "";
+  try{ text = await ocrWith(overlayUrl, "eng+hin", LANG_PATH_BEST, { user_defined_dpi: 300 }); }
+  catch{ /* continue */ }
 
-    if(needUpgrade){
-      // 2) Try Marathi pack from 4.0.0; if fails, retry eng+hin on 4.0.0
+  const dev = hasDevanagari(text);
+  const {lat:aLat, lon:aLon} = extractCoords(text);
+  const needUpgrade = dev || !aLat || !aLon;
+
+  if(needUpgrade){
+    // Pass B: try best with Marathi; if network blocks, fallback to 4.0.0 repo
+    try{
+      setStatus(`OCR (eng+hin+mar · tessdata_best)…`,"warn");
+      const t2 = await ocrWith(overlayUrl, "eng+hin+mar", LANG_PATH_BEST, { user_defined_dpi: 300 });
+      if(t2 && (t2.length > text.length*1.05 || hasDevanagari(t2))) text = t2;
+    }catch{
       try{
-        setStatus(`OCR (eng+hin+mar via 4.0.0)…`,"warn");
-        const r2 = await Tesseract.recognize(imageUrl, "eng+hin+mar", {
-          langPath: LANG_PATH_V40,
-          tessedit_pageseg_mode: 6,
-          preserve_interword_spaces: 1
-        });
-        const t2 = r2?.data?.text || "";
-        // Prefer the longer / richer result
-        if(t2 && (t2.length > text.length*1.05 || hasDevanagari(t2))) text = t2;
-        return text;
-      }catch(e){
-        // If Marathi traineddata unavailable or network error, fallback
-        setStatus(`OCR (eng+hin via 4.0.0)…`,"warn");
-        const r3 = await Tesseract.recognize(imageUrl, "eng+hin", {
-          langPath: LANG_PATH_V40,
-          tessedit_pageseg_mode: 6,
-          preserve_interword_spaces: 1
-        });
-        const t3 = r3?.data?.text || "";
-        if(t3 && t3.length > text.length*1.05) text = t3;
-        return text;
+        setStatus(`OCR (eng+hin+mar · 4.0.0)…`,"warn");
+        const t3 = await ocrWith(overlayUrl, "eng+hin+mar", LANG_PATH_40, { user_defined_dpi: 300 });
+        if(t3 && (t3.length > text.length*1.05 || hasDevanagari(t3))) text = t3;
+      }catch{
+        // last fallback: eng+hin 4.0.0
+        try{
+          const t4 = await ocrWith(overlayUrl, "eng+hin", LANG_PATH_40, { user_defined_dpi: 300 });
+          if(t4 && t4.length > text.length) text = t4;
+        }catch{}
       }
     }
-
-    // No upgrade needed
-    return text;
-
-  }catch(e1){
-    // If v5 path failed entirely, ensure v4 runtime and do 4.0.0 attempts
-    await ensureV4();
-    try{
-      setStatus(`OCR (eng+hin+mar via v4)…`,"warn");
-      const r = await Tesseract.recognize(imageUrl, "eng+hin+mar", {
-        langPath: LANG_PATH_V40, tessedit_pageseg_mode: 6, preserve_interword_spaces: 1
-      });
-      return r?.data?.text || "";
-    }catch(e2){
-      setStatus(`OCR (eng+hin via v4)…`,"warn");
-      const r = await Tesseract.recognize(imageUrl, "eng+hin", {
-        langPath: LANG_PATH_V40, tessedit_pageseg_mode: 6, preserve_interword_spaces: 1
-      });
-      return r?.data?.text || "";
-    }
   }
+
+  // Numeric ROI pass to stabilise Lat/Long & Date/Time
+  const roiText = await ocrNumericROI(overlayUrl);
+  return { full:text, roi:roiText };
 }
 
 /* ---------- Redirect ---------- */
@@ -402,14 +408,29 @@ async function runPipeline(file){
     endStage(0);
 
     startStage(1); els.overlayImg.src=crop.displayUrl; els.overlayScanner.style.display="block";
-    let text="";
-    try{ text=await ocrAuto(crop.ocrUrl); }
+
+    let ocr = {full:"", roi:""};
+    try{ ocr = await ocrAutoFull(crop.ocrUrl); }
     catch{ els.overlayScanner.style.display="none"; setStatus("OCR failed. Please Retry.","err"); onStageTimeout(1); return; }
     els.overlayScanner.style.display="none"; endStage(1);
 
     startStage(2); setStatus("Parsing extracted text…","warn");
-    const parsed = parseAll(text);
-    Object.assign(state.data, parsed);
+
+    // 1) Parse from full text
+    const addr = extractAddress(ocr.full);
+    const dt   = extractDateTime(ocr.full);
+    let   crd  = extractCoords(ocr.full);
+
+    // 2) Override coords/time with numeric ROI if that looks better
+    const roiC = extractCoords(ocr.roi);
+    const roiD = extractDateTime(ocr.roi);
+    const isMumbai = (c)=> c.lat && c.lon && +c.lat>18 && +c.lat<20 && +c.lon>72 && +c.lon<73;
+
+    if(isMumbai(roiC)) crd = roiC;
+    if(roiD.time) dt.time = roiD.time;
+    if(roiD.date) dt.date = roiD.date;
+
+    Object.assign(state.data, { address:addr, ...crd, ...dt });
     render(); endStage(2);
 
     startStage(3); setStatus("GeoJSON lookup…","warn");
@@ -430,23 +451,11 @@ async function runPipeline(file){
   reader.readAsDataURL(file);
 }
 
-/* ---------- Parse wrapper ---------- */
-function parseAll(text){
-  const raw=String(text||"").replace(/\u00A0|\u2009|\u2002|\u2003/g," ").replace(/[|·•]+/g," ").replace(/\s{2,}/g," ").trim();
-  const toIsoDate=s=>{ const m=s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/); if(!m) return ""; let [_,d,mo,y]=m; if(y.length===2) y=+y<50?"20"+y:"19"+y; return `${y}-${mo.padStart(2,"0")}-${d.padStart(2,"0")}`; };
-  const to24h=s=>{ s=s.trim().toUpperCase(); const m=s.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/); if(!m) return ""; let h=+m[1],mi=m[2],ap=m[3]||""; if(ap==="PM"&&h<12) h+=12; if(ap==="AM"&&h===12) h=0; return `${String(h).padStart(2,"0")}:${mi}`; };
-  const dt=raw.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}).{0,6}(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i);
-  const date=dt?toIsoDate(dt[1]):""; const time=dt?to24h(dt[2]):"";
-  const { lat, lon } = extractCoords(raw);
-  const address = extractAddress(raw);
-  return { lat, lon, address, date, time };
-}
-
 /* ---------- Boot ---------- */
 (async ()=>{
   initResultSkeleton();
   bindDropzone();
-  els.appVersion.textContent=BUILD;
+  $("#appVersion").textContent=BUILD;
 
   setStatus("Loading OCR library…","warn");
   await loadOCR();
@@ -460,5 +469,5 @@ function parseAll(text){
   }
 
   updateTimes();
-  applyChips(0); // show initial "Upload" active
+  applyChips(0);
 })();
