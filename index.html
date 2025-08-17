@@ -32,15 +32,12 @@
           <option value="indic">ENG+Indic</option>
         </select>
       </div>
-
       <button id="btnReset" class="btn ghost">Reset</button>
-      <img class="cres-logo"
-           src="data/Crescendo Logo.png"
-           alt="Crescendo IT Solutions" />
+      <img class="cres-logo" src="data/Crescendo Logo.png" alt="Crescendo IT Solutions" />
     </div>
   </header>
 
-  <!-- Chips + status row -->
+  <!-- Chips + progress -->
   <div class="top-rail">
     <ul class="milestones">
       <li class="chip" data-i="0">Upload</li>
@@ -50,9 +47,7 @@
       <li class="chip" data-i="4">Review</li>
       <li class="chip" data-i="5">Redirect</li>
     </ul>
-    <div class="progress">
-      <span id="bar"></span>
-    </div>
+    <div class="progress"><span id="bar"></span></div>
     <div class="cdn-pill" id="cdnPill">CDN: checking…</div>
   </div>
 
@@ -61,10 +56,10 @@
     <a href="#">Home</a> › <a href="#">Abandoned Vehicles</a> › <span>Marshal Upload</span>
   </nav>
 
-  <!-- Content -->
+  <!-- Main content -->
   <main class="container">
     <section class="grid">
-      <!-- Left: Upload + Photos -->
+      <!-- Left column -->
       <div>
         <div class="card" id="dropCard">
           <h3>Upload Photo</h3>
@@ -93,23 +88,21 @@
         </div>
       </div>
 
-      <!-- Right: Results -->
+      <!-- Right column -->
       <div>
         <div class="card">
           <h3>Results</h3>
-          <div id="results">
-            <!-- JS populates skeleton rows and values -->
-          </div>
-          <div id="resultsNote" class="note">
-            Results will be populated post processing.
-          </div>
+          <div id="results"><!-- rows inserted by JS --></div>
+          <div id="resultsNote" class="note">Results will be populated post processing.</div>
         </div>
       </div>
     </section>
 
     <div class="statusbar">
       <span id="status" class="status">Initializing…</span>
-      <span id="stageTimes" class="times">Upload — 0.0s • OCR — 0.0s • Parse — 0.0s • GeoJSON — 0.0s • Review — 0.0s • Redirect — 0.0s</span>
+      <span id="stageTimes" class="times">
+        Upload — 0.0s • OCR — 0.0s • Parse — 0.0s • GeoJSON — 0.0s • Review — 0.0s • Redirect — 0.0s
+      </span>
     </div>
 
     <div id="redirectNote" class="redirect hidden"></div>
@@ -129,7 +122,7 @@
     </div>
   </footer>
 
-  <!-- Modal (generic) -->
+  <!-- Generic Modal -->
   <div id="modalBackdrop" class="modal-backdrop" style="display:none;">
     <div class="modal">
       <h3 id="modalTitle">Notice</h3>
@@ -141,7 +134,7 @@
     </div>
   </div>
 
-  <!-- Modal (timeout) -->
+  <!-- Timeout Modal -->
   <div id="timeoutBackdrop" class="modal-backdrop" style="display:none;">
     <div class="modal">
       <h3 id="timeoutTitle">Stage Timed Out</h3>
