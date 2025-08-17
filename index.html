@@ -22,7 +22,7 @@
     :root{
       --mcgm-blue:#0b5aa3; --mcgm-blue-dark:#0a4a87; --mcgm-orange:#ff9933;
       --bg:#f5f7fb; --fg:#0d2438; --muted:#5b6b7a; --line:#dde6f1; --card:#ffffff;
-      --ok:#198754; --warn:#f59e0b; --err:#dc3545; --accent:#0b5aa3;
+      --ok:#198754; --warn:#f59e0b; --err:#dc3545;
       --radius:14px;
       --shadow-card: 0 6px 22px rgba(10,25,55,.10), 0 1px 0 rgba(10,25,55,.06);
       --shadow-img:  0 10px 24px rgba(0,0,0,.12);
@@ -38,7 +38,7 @@
       -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
       font-size: clamp(14px, 1.8vw, 16px);
     }
-    a{color:var(--mcgm-blue); text-decoration:none}
+    a{color:#0b5aa3; text-decoration:none}
     a:hover{text-decoration:underline}
 
     /* ========== Sticky Masthead (Header + Progress) ========== */
@@ -46,9 +46,9 @@
       position: sticky; top: 0; z-index: 1000;
       background: #fff;
       box-shadow: var(--shadow-float);
-      border-bottom: 4px solid var(--mcgm-orange);
+      border-bottom: 4px solid #ff9933;
     }
-    .topbar{background:var(--mcgm-blue); color:#fff}
+    .topbar{background:#0b5aa3; color:#fff}
     .topbar-inner{
       max-width:1180px; margin:0 auto; padding:0 16px;
       height:var(--topbar-h);
@@ -58,79 +58,54 @@
     .brand-title{font-weight:700; font-size:clamp(16px,2.6vw,20px); line-height:1.2}
     .brand-sub{font-size:clamp(12px,2vw,14px); opacity:.9}
 
-  /* Right-side partner badge for Crescendo logo */
-.header-actions{
-  margin-left:auto;
-  display:flex;
-  align-items:center;
-  gap:12px;
-}
-
-.partner-badge{
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  /* semi-transparent white bg + subtle blur for polish */
-  background: rgba(255,255,255,.65);
-  -webkit-backdrop-filter: saturate(120%) blur(2px);
-  backdrop-filter: saturate(120%) blur(2px);
-  padding: 4px 8px;
-  border-radius: 10px;
-  box-shadow: 0 2px 10px rgba(0,0,0,.18), 0 1px 0 rgba(255,255,255,.6) inset;
-}
-
-/* Ensure the Crescendo mark fills the header height nicely */
-.partner-badge img{
-  height: calc(var(--topbar-h) - 12px); /* full header height minus padding */
-  max-height: 68px;                     /* safety cap on very tall screens */
-  width: auto;                          /* keep aspect ratio */
-  display:block;
-}
-
+    /* RIGHT SIDE: Reset + Crescendo logo (semi-transparent pill) */
+    .header-actions{
+      margin-left:auto;
+      display:flex;
+      align-items:center;
+      gap:12px;
+    }
     .btn-reset{padding:8px 12px; border-radius:8px; border:1px solid #cfe0f3; background:#f7fbff; color:#0c3963; cursor:pointer; font-weight:600}
+    .partner-badge{
+      display:flex; align-items:center; justify-content:center;
+      background: rgba(255,255,255,.65);
+      -webkit-backdrop-filter: saturate(120%) blur(2px);
+      backdrop-filter: saturate(120%) blur(2px);
+      padding: 4px 8px;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0,0,0,.18), 0 1px 0 rgba(255,255,255,.6) inset;
+    }
+    .partner-badge img{
+      height: calc(var(--topbar-h) - 12px);
+      max-height: 68px;
+      width: auto;
+      display:block;
+    }
 
-    /* Progress strip right below header */
+    /* Progress strip */
     .progress-strip{
       background:linear-gradient(180deg,#ffffff 0%, #f6f9ff 100%);
-      border-top:1px solid #e7eef7;
-      border-bottom:1px solid #e7eef7;
+      border-top:1px solid #e7eef7; border-bottom:1px solid #e7eef7;
     }
     .progress-inner{max-width:1180px; margin:0 auto; padding:10px 16px}
     .milestones{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
-    .chip{
-      display:inline-flex; align-items:center; gap:8px;
-      padding:6px 10px; border-radius:999px; border:1px solid var(--line);
-      background:#f4f8ff; color:#0c3963; font-size:clamp(12px,2vw,13px);
-      transition: box-shadow .25s ease, background .25s ease, border-color .25s ease;
-    }
+    .chip{display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; border:1px solid var(--line); background:#f4f8ff; color:#0c3963; font-size:clamp(12px,2vw,13px); transition: box-shadow .25s ease, background .25s ease, border-color .25s ease}
     .chip .ico{position:relative; width:14px; height:14px; border-radius:50%; flex:0 0 14px}
-    .chip.pending .ico{ border:2px solid #b9c7d6; background:#fff; }
-    .chip.active{ box-shadow:0 0 0 3px rgba(245,158,11,.18), 0 0 18px rgba(245,158,11,.35); border-color:#ffd166; background:#fff8eb; }
-    .chip.active .ico{
-      border:2px solid #f59e0b; border-top-color:transparent; border-right-color:transparent;
-      animation:spin 1s linear infinite; background:#fff;
-    }
-    .chip.done{ box-shadow:0 0 0 3px rgba(25,135,84,.18), 0 0 18px rgba(25,135,84,.35); border-color:#b9e8cc; background:#eefcf4; }
-    .chip.done .ico{ background:#198754; }
-    .chip.done .ico::after{
-      content:""; position:absolute; left:3px; top:1px; width:4px; height:8px;
-      border-right:2px solid #fff; border-bottom:2px solid #fff; transform:rotate(45deg);
-    }
+    .chip.pending .ico{ border:2px solid #b9c7d6; background:#fff }
+    .chip.active{ box-shadow:0 0 0 3px rgba(245,158,11,.18), 0 0 18px rgba(245,158,11,.35); border-color:#ffd166; background:#fff8eb }
+    .chip.active .ico{ border:2px solid #f59e0b; border-top-color:transparent; border-right-color:transparent; animation:spin 1s linear infinite; background:#fff }
+    .chip.done{ box-shadow:0 0 0 3px rgba(25,135,84,.18), 0 0 18px rgba(25,135,84,.35); border-color:#b9e8cc; background:#eefcf4 }
+    .chip.done .ico{ background:#198754 }
+    .chip.done .ico::after{content:""; position:absolute; left:3px; top:1px; width:4px; height:8px; border-right:2px solid #fff; border-bottom:2px solid #fff; transform:rotate(45deg)}
     @keyframes spin{to{transform:rotate(360deg)}}
-
     .bar{height:10px; border-radius:999px; background:#e9f1fb; border:1px solid var(--line); overflow:hidden; margin-top:8px}
     .bar-fill{height:100%; width:0%; background:linear-gradient(90deg,#ffbd59,#ffd166); transition:width .35s ease}
-
     .strip-row{display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:8px}
     .status{font-size:clamp(12px,2vw,13px)}
     .ok{color:var(--ok)} .warn{color:var(--warn)} .err{color:var(--err)}
     .countdown{font-weight:700; color:#0b5aa3}
     .stage-times{font-size:12px; color:#3a5677}
-
-    .cdn-pill{
-      margin-left:auto; padding:4px 10px; border-radius:999px; font-size:12px; font-weight:600;
-      border:1px solid #cfe0f3; background:#f7fbff; color:#0c3963;
-    }
+    .cdn-pill{margin-left:auto; padding:4px 10px; border-radius:999px; font-size:12px; font-weight:600; border:1px solid #cfe0f3; background:#f7fbff; color:#0c3963}
     .cdn-pill.ok{background:#eefcf4; border-color:#b9e8cc; color:#0f5132}
     .cdn-pill.err{background:#fff0f0; border-color:#f3c0c0; color:#842029}
 
@@ -142,76 +117,46 @@
     /* Container */
     .wrap{max-width:1180px; margin:16px auto; padding:0 12px}
 
-    /* Grid layout (mobile-first single column; 2-col on >= 980px) */
-    .grid{
-      display:grid;
-      grid-template-columns: 1fr;
-      grid-template-areas:
-        "image"
-        "results";
-      gap:12px;
-    }
-    @media (min-width: 980px){
-      .grid{
-        grid-template-columns: 430px 1fr;
-        grid-template-areas:
-          "image results";
-        gap:18px;
-      }
-    }
+    /* Grid */
+    .grid{display:grid; grid-template-columns: 1fr; grid-template-areas:"image" "results"; gap:12px}
+    @media (min-width: 980px){ .grid{ grid-template-columns: 430px 1fr; grid-template-areas:"image results"; gap:18px } }
     .col-image{grid-area:image}
     .col-results{grid-area:results}
 
     /* Cards */
-    .card{
-      background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
-      box-shadow:var(--shadow-card); transition:box-shadow .25s ease;
-    }
-    .card:hover{ box-shadow:var(--shadow-hover); }
+    .card{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow-card); transition:box-shadow .25s ease}
+    .card:hover{ box-shadow:var(--shadow-hover) }
     .card .hdr{padding:12px 14px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:10px}
     .card .hdr .title{font-weight:700; color:#143a63}
     .card .body{padding:12px}
 
     /* Dropzone */
-    .drop{
-      border:2px dashed #cfe0f3; border-radius:var(--radius); min-height:120px;
-      display:grid; place-items:center; text-align:center; padding:18px; cursor:pointer;
-      background:#fbfdff;
-    }
+    .drop{border:2px dashed #cfe0f3; border-radius:var(--radius); min-height:120px; display:grid; place-items:center; text-align:center; padding:18px; cursor:pointer; background:#fbfdff}
     .drop:hover{border-color:#9ec5ff; background:#f6fbff}
     .dz-title{font-weight:600; color:#133a62; font-size:clamp(14px,2.4vw,16px)}
     .dz-hint{font-size:clamp(12px,2vw,13px); color:#5f7896}
 
     /* Photo surfaces */
-    .photo-surface{
-      background:linear-gradient(180deg,#ffffff 0%, #f7fbff 100%);
-      border:1px solid var(--line);
-      border-radius:12px; padding:10px;
-      box-shadow: var(--shadow-img);
-    }
-    .photo-surface--orig{ display:flex; justify-content:center; align-items:center; }
+    .photo-surface{background:linear-gradient(180deg,#ffffff 0%, #f7fbff 100%); border:1px solid var(--line); border-radius:12px; padding:10px; box-shadow: var(--shadow-img)}
+    .photo-surface--orig{ display:flex; justify-content:center; align-items:center }
 
     /* Images */
     .overlay-container{position:relative; display:none}
     .preview{width:100%; max-width:100%; height:auto; border-radius:10px; border:1px solid var(--line)}
-    .preview-small{ width:25%; max-width:25%; min-width:120px; height:auto; border-radius:10px; border:1px solid var(--line); }
-    .overlay-scanner{
-      position:absolute; top:0; left:0; right:0; height:20%;
-      background:linear-gradient(to bottom, rgba(255,187,68,.55), rgba(255,187,68,0));
-      border-radius:10px; display:none; animation:scanMove 3s linear infinite;
-      box-shadow: 0 0 0 2px rgba(255,187,68,.35) inset, 0 8px 20px rgba(255,187,68,.25);
-    }
+    .preview-small{ width:25%; max-width:25%; min-width:120px; height:auto; border-radius:10px; border:1px solid var(--line) }
+    .overlay-scanner{position:absolute; top:0; left:0; right:0; height:20%; background:linear-gradient(to bottom, rgba(255,187,68,.55), rgba(255,187,68,0)); border-radius:10px; display:none; animation:scanMove 3s linear infinite; box-shadow: 0 0 0 2px rgba(255,187,68,.35) inset, 0 8px 20px rgba(255,187,68,.25)}
     @keyframes scanMove{0%{top:0;}100%{top:100%;}}
     @media (prefers-reduced-motion: reduce){ .overlay-scanner{animation:none} .bar-fill{transition:none} }
 
     /* Results (read-only) */
-    .kv{display:grid; grid-template-columns: 1fr; gap:6px; padding:10px 0; border-bottom:1px dashed #e4edf7}
+    .kv{display:grid; grid-template-columns:1fr; gap:6px; padding:10px 0; border-bottom:1px dashed #e4edf7}
     .kv:last-child{border-bottom:0}
     .k{font-weight:700; color:#0f3468}
     .v{font-family:ui-monospace,Menlo,Consolas,monospace; color:#1b3d62; word-break:break-word}
-    @media (min-width: 600px){ .kv{grid-template-columns: 200px 1fr} }
+    @media (min-width:600px){ .kv{grid-template-columns:200px 1fr} }
 
-    .footer{margin-top:16px; background:var(--mcgm-blue-dark); color:#e9f2fb; border-top:3px solid var(--mcgm-orange)}
+    /* Footer */
+    .footer{margin-top:16px; background:#0a4a87; color:#e9f2fb; border-top:3px solid #ff9933}
     .footer-inner{max-width:1180px; margin:0 auto; padding:14px; font-size:clamp(12px,2vw,13px); text-align:center}
     .footer-inner a{color:#ffd166; font-weight:600}
 
@@ -223,54 +168,80 @@
     .modal .m-actions{padding:12px 16px; border-top:1px solid #eef3f9; display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap}
     .btn{padding:10px 14px; border-radius:8px; border:1px solid #cfe0f3; background:#f7fbff; color:#0c3963; cursor:pointer; font-weight:600}
     .btn-danger{background:#ffe2e0; border-color:#f3b3ad; color:#8a1c13}
-    .btn-primary{background:var(--mcgm-orange); border-color:var(--mcgm-orange); color:#422306}
+    .btn-primary{background:#ff9933; border-color:#ff9933; color:#422306}
     .m-err{color:#b42318}
   </style>
 
-  <!-- OCR + Geo (cache-busted) -->
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js?v=20250817"></script>
+  <!-- Turf only (Tesseract loaded via robust loader below) -->
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.2.0/turf.min.js?v=20250817"></script>
 
-  <!-- Patch Tesseract to ALWAYS use array paths (kills x.map crash in any code path) -->
+  <!-- OCR loader: try Tesseract v5.0.3, fallback to v4.0.2, and harden createWorker -->
   <script>
-    (function(){
-      // Defaults (primary jsDelivr; fallback defined later)
-      window.__OCR_PRIMARY__ = {
-        name:"jsDelivr",
-        workerPath:'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
-        corePath:['https://cdn.jsdelivr.net/npm/tesseract.js-core@5'],
-        langPath:['https://cdn.jsdelivr.net/npm/@tesseract.js-data']
-      };
-      window.__OCR_FALLBACK__ = {
-        name:"unpkg",
-        workerPath:'https://unpkg.com/tesseract.js@5/dist/worker.min.js',
-        corePath:['https://unpkg.com/tesseract.js-core@5'],
-        langPath:['https://unpkg.com/@tesseract.js-data']
-      };
-      window.CDN_CURRENT = Object.assign({}, window.__OCR_PRIMARY__);
-
-      const arr = x => Array.isArray(x) ? x : [x];
-      if (window.Tesseract && Tesseract.createWorker) {
-        const _orig = Tesseract.createWorker;
-        Tesseract.createWorker = function patchedCreateWorker(opts = {}) {
-          const o = {...opts};
-          if (!o.workerPath) o.workerPath = window.CDN_CURRENT.workerPath;
-          if (!o.corePath)   o.corePath   = window.CDN_CURRENT.corePath;
-          if (!o.langPath)   o.langPath   = window.CDN_CURRENT.langPath;
-          o.corePath = arr(o.corePath);
-          o.langPath = arr(o.langPath);
-          // DO NOT pass logger into the worker init to avoid DataCloneError.
-          if (o.logger) delete o.logger;
-          return _orig.call(Tesseract, o);
-        };
+    window.__OCR_CDNS__ = {
+      v5: {
+        name: "jsDelivr v5.0.3",
+        workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.0.3/dist/worker.min.js',
+        corePath:   ['https://cdn.jsdelivr.net/npm/tesseract.js-core@5'],
+        langPath:   ['https://cdn.jsdelivr.net/npm/@tesseract.js-data']
+      },
+      v4: {
+        name: "jsDelivr v4.0.2",
+        script: 'https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js'
       }
-      window.__arr = arr; // reuse later
+    };
+    (function () {
+      const addScript = (src) => new Promise((res, rej) => {
+        const s = document.createElement('script');
+        s.src = src + (src.includes('?') ? '&' : '?') + 'v=fix';
+        s.onload = res; s.onerror = rej; document.head.appendChild(s);
+      });
+      const arr = (x) => Array.isArray(x) ? x : [x];
+
+      // Load v5 first; if it fails, fall back to v4
+      addScript('https://cdn.jsdelivr.net/npm/tesseract.js@5.0.3/dist/tesseract.min.js')
+        .then(() => {
+          window.__OCR_VERSION__ = 'v5';
+          const cfg = window.__OCR_CDNS__.v5;
+          if (window.Tesseract?.createWorker) {
+            const _cw = Tesseract.createWorker;
+            Tesseract.createWorker = function (opts = {}) {
+              const o = {...opts};
+              if (!o.workerPath) o.workerPath = cfg.workerPath;
+              if (!o.corePath)   o.corePath   = cfg.corePath;
+              if (!o.langPath)   o.langPath   = cfg.langPath;
+              o.corePath = arr(o.corePath);
+              o.langPath = arr(o.langPath);
+              if (o.logger) delete o.logger; // avoid DataCloneError
+              return _cw.call(Tesseract, o);
+            };
+          }
+          if (window.Tesseract?.recognize) {
+            const _rec = Tesseract.recognize;
+            Tesseract.recognize = function (img, langs='eng', opts={}) {
+              const o = {...opts};
+              const cfg = window.__OCR_CDNS__.v5;
+              if (!o.corePath) o.corePath = cfg.corePath;
+              if (!o.langPath) o.langPath = cfg.langPath;
+              o.corePath = arr(o.corePath);
+              o.langPath = arr(o.langPath);
+              if (o.logger) delete o.logger;
+              return _rec.call(Tesseract, img, langs, o);
+            };
+          }
+        })
+        .catch(async () => {
+          await addScript(window.__OCR_CDNS__.v4.script);
+          window.__OCR_VERSION__ = 'v4';
+        });
+
+      // expose helper
+      window.__arr = arr;
     })();
   </script>
 </head>
 <body>
 
-  <!-- MASTHEAD (sticky): Header + Progress strip -->
+  <!-- MASTHEAD -->
   <div class="masthead">
     <div class="topbar">
       <div class="topbar-inner">
@@ -279,25 +250,16 @@
           <div class="brand-title">Municipal Corporation of Greater Mumbai</div>
           <div class="brand-sub">Abandoned Vehicles – Identification & Pre-Notice (Marshal Upload)</div>
         </div>
-
-       <div class="header-actions">
-  <button id="btnReset" class="btn-reset" title="Clear data & restart">Reset</button>
-
-  <!-- Crescendo logo with semi-transparent white background -->
-  <div class="partner-badge" title="Crescendo Innovative Solutions LLP">
-    <img
-      src="./data/Crescendo%20Logo.png"
-      alt="Crescendo Innovative Solutions LLP"
-      loading="eager"
-      decoding="async"
-    />
-  </div>
-</div>
-
+        <div class="header-actions">
+          <button id="btnReset" class="btn-reset" title="Clear data & restart">Reset</button>
+          <div class="partner-badge" title="Crescendo Innovative Solutions LLP">
+            <img src="./data/Crescendo%20Logo.png" alt="Crescendo Innovative Solutions LLP" loading="eager" decoding="async"/>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- PROGRESS (chips + bar + status + times) -->
+    <!-- PROGRESS -->
     <div class="progress-strip">
       <div class="progress-inner">
         <div class="milestones" id="milestones">
@@ -322,8 +284,7 @@
   <!-- BREADCRUMBS -->
   <div class="crumbs">
     <div class="crumbs-inner">
-      <a href="https://www.mcgm.gov.in" target="_blank" rel="noopener">Home</a> ›
-      Abandoned Vehicles › Marshal Upload
+      <a href="https://www.mcgm.gov.in" target="_blank" rel="noopener">Home</a> › Abandoned Vehicles › Marshal Upload
     </div>
   </div>
 
@@ -377,18 +338,18 @@
     </div>
   </div>
 
-  <!-- FOOTER -->
+  <!-- FOOTER (with version) -->
   <div class="footer">
     <div class="footer-inner">
       Developed by <strong>Crescendo Innovative Solutions LLP</strong>. All rights reserved by <strong>Crescendo</strong> •
       Admin: <strong>Huzefa Fakhruddin</strong> — <a href="mailto:Care@crescendoits.com">Care@crescendoits.com</a> •
       &copy; 2025 Municipal Corporation of Greater Mumbai (MCGM) —
       <a href="https://www.mcgm.gov.in" target="_blank" rel="noopener">www.mcgm.gov.in</a>
+      <div style="margin-top:6px;opacity:.9">Build: <span id="appVersion">v2025.08.17</span></div>
     </div>
   </div>
 
   <!-- MODALS -->
-  <!-- Outside boundary -->
   <div id="modalBackdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
     <div class="modal">
       <div class="m-hdr m-err" id="modalTitle">Outside MCGM Boundaries — Not allowed</div>
@@ -400,7 +361,6 @@
     </div>
   </div>
 
-  <!-- Stage Timeout -->
   <div id="timeoutBackdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="timeoutTitle">
     <div class="modal">
       <div class="m-hdr m-err" id="timeoutTitle">Stage Timed Out</div>
@@ -416,7 +376,6 @@
     </div>
   </div>
 
-  <!-- CDN Unavailable -->
   <div id="cdnBackdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="cdnTitle">
     <div class="modal">
       <div class="m-hdr m-err" id="cdnTitle">CDN Connectivity Issue</div>
@@ -449,11 +408,6 @@ const GEOJSON_WARDS_URL  = "./data/wards.geojson";
 const GEOJSON_BEATS_URL  = "./data/beats.geojson";
 const GEOJSON_POLICE_URL = "./data/police_jurisdiction.geojson";
 
-/* ========= CDN endpoints (referenced by earlier patch) ========= */
-const CDN_PRIMARY = window.__OCR_PRIMARY__;
-const CDN_FALLBACK = window.__OCR_FALLBACK__;
-let CDN_READY = false;
-
 /* ========= Stage timings & limits ========= */
 const STAGE_NAMES = ["Upload","OCR","Parse","GeoJSON","Review","Redirect"];
 const STAGE_LIMITS = [20000, 90000, 10000, 15000, 45000, 20000]; // ms
@@ -463,37 +417,28 @@ const els = {
   dropCard: document.getElementById('dropCard'),
   drop: document.getElementById('drop'),
   file: document.getElementById('file'),
-
   originalCard: document.getElementById('originalCard'),
   originalImg: document.getElementById('originalImg'),
-
   overlayCard: document.getElementById('overlayCard'),
   overlayWrap: document.getElementById('overlayWrap'),
   overlayImg: document.getElementById('overlayImg'),
   overlayScanner: document.getElementById('overlayScanner'),
-
   btnReset: document.getElementById('btnReset'),
   status: document.getElementById('status'),
   bar: document.getElementById('bar'),
   results: document.getElementById('results'),
   redirectNote: document.getElementById('redirectNote'),
   cdnPill: document.getElementById('cdnPill'),
-  ms: [
-    document.getElementById('ms1'),document.getElementById('ms2'),document.getElementById('ms3'),
-    document.getElementById('ms4'),document.getElementById('ms5'),document.getElementById('ms6')
-  ],
+  ms: [document.getElementById('ms1'),document.getElementById('ms2'),document.getElementById('ms3'),document.getElementById('ms4'),document.getElementById('ms5'),document.getElementById('ms6')],
   stageTimes: document.getElementById('stageTimes'),
-
   modalBackdrop: document.getElementById('modalBackdrop'),
   modalCancel: document.getElementById('modalCancel'),
   modalReset: document.getElementById('modalReset'),
-
   timeoutBackdrop: document.getElementById('timeoutBackdrop'),
   timeoutTitle: document.getElementById('timeoutTitle'),
   timeoutBody: document.getElementById('timeoutBody'),
   timeoutRetry: document.getElementById('timeoutRetry'),
   timeoutClose: document.getElementById('timeoutClose'),
-
   cdnBackdrop: document.getElementById('cdnBackdrop'),
   cdnBody: document.getElementById('cdnBody'),
   cdnRetry: document.getElementById('cdnRetry'),
@@ -509,7 +454,6 @@ const state = {
   gj: { wards:null, beats:null, police:null },
   countdownTimer: null,
   outside: false,
-  // timing
   stageStart: Array(6).fill(null),
   stageElapsed: Array(6).fill(0),
   stageTimeouts: Array(6).fill(null),
@@ -517,8 +461,8 @@ const state = {
   timedOut: false
 };
 
-/* ========= Small helpers ========= */
-const arr = window.__arr;
+/* ========= Helpers ========= */
+const arr = window.__arr || (x=>Array.isArray(x)?x:[x]);
 function setStatus(msg, cls){ els.status.className = 'status ' + (cls||''); els.status.textContent = msg; }
 function kvRow(id, label, value){
   let row = document.getElementById(id);
@@ -557,32 +501,30 @@ function buildPrefillURL(){
 }
 
 /* ========= Stage visuals ========= */
-function applyChipClasses(activeIndex){
-  els.ms.forEach((chip,i)=>{
+function applyChipClasses(i){
+  els.ms.forEach((chip,idx)=>{
     chip.classList.remove('pending','active','done');
-    if(i < activeIndex) chip.classList.add('done');
-    else if(i === activeIndex) chip.classList.add('active');
+    if(idx < i) chip.classList.add('done');
+    else if(idx === i) chip.classList.add('active');
     else chip.classList.add('pending');
   });
-  const fillPct = Math.max(0, Math.min(100, (activeIndex/5)*100));
-  els.bar.style.width = fillPct + '%';
+  els.bar.style.width = Math.max(0, Math.min(100, (i/5)*100)) + '%';
 }
 function fmt(ms){ return (ms>0 && isFinite(ms)) ? (ms/1000).toFixed(1)+'s' : '0.0s'; }
 function updateStageTimes(){
-  const parts = ["Upload","OCR","Parse","GeoJSON","Review","Redirect"].map((name,i)=>{
+  const names = ["Upload","OCR","Parse","GeoJSON","Review","Redirect"];
+  const parts = names.map((name,i)=>{
     const running = state.stageStart[i] !== null && (i === currentStageIndex());
     const v = running ? (Date.now() - state.stageStart[i]) : state.stageElapsed[i];
     return `${name} — ${fmt(v)}`;
   });
-  els.stageTimes.textContent = parts.join(' • ');
+  document.getElementById('stageTimes').textContent = parts.join(' • ');
 }
 function currentStageIndex(){
   for(let i=0;i<6;i++){ if(state.stageStart[i] !== null && state.stageElapsed[i] === 0) return i; }
   for(let i=5;i>=0;i--) if(state.stageElapsed[i]>0) return Math.min(i+1,5);
   return 0;
 }
-
-/* ========= Stage control ========= */
 function startStage(i){
   if(state.timedOut) return;
   for(let k=0;k<i;k++){ if(state.stageStart[k]!==null && state.stageElapsed[k]===0) endStage(k); }
@@ -605,41 +547,32 @@ function onStageTimeout(i){
   document.getElementById('timeoutTitle').textContent = `Stage Timed Out — ${name}`;
   document.getElementById('timeoutBody').innerHTML = `
     The <strong>${name}</strong> stage exceeded the maximum allowed time of <strong>${limit}</strong>.<br/><br/>
-    <strong>Reason (typical):</strong> network slowness, large image, or blocked resources (CDN).<br/><br/>
+    <strong>Reason (typical):</strong> network slowness, large/corrupted image, or blocked resources (CDN).<br/><br/>
     <strong>Admin:</strong> Huzefa Fakhruddin — <a href="mailto:Care@crescendoits.com">Care@crescendoits.com</a>
   `;
-  els.timeoutBackdrop.style.display = 'flex';
+  document.getElementById('timeoutBackdrop').style.display = 'flex';
 }
 
-/* ========= Redirect handling ========= */
-function startRedirectCountdown(sec){
-  clearInterval(state.countdownTimer);
-  els.redirectNote.style.display = 'block';
-  let left = sec;
-  els.redirectNote.innerHTML = `All set. Redirecting to Google Form in <span class="countdown">${left}s</span>… <a href="#" id="cancelRedirect">Cancel</a>`;
-  state.countdownTimer = setInterval(()=>{
-    left -= 1;
-    const span = els.redirectNote.querySelector('.countdown');
-    if(span) span.textContent = left + 's';
-    if(left <= 0){
-      clearInterval(state.countdownTimer);
-      window.location.href = buildPrefillURL();
-    }
-  },1000);
-  els.redirectNote.onclick = (e)=>{
-    if(e.target && e.target.id === 'cancelRedirect'){
-      e.preventDefault();
-      clearInterval(state.countdownTimer);
-      els.redirectNote.innerHTML = `<button id="openFormNow" class="btn">Open Google Form now</button>`;
-      document.getElementById('openFormNow').onclick = ()=>{ window.location.href = buildPrefillURL(); };
-    }
-  };
+/* ========= GeoJSON ========= */
+async function loadGeo(){
+  const [w,b,p] = await Promise.all([
+    fetch("./data/wards.geojson").then(r=>r.json()),
+    fetch("./data/beats.geojson").then(r=>r.json()),
+    fetch("./data/police_jurisdiction.geojson").then(r=>r.json())
+  ]);
+  state.gj.wards=w; state.gj.beats=b; state.gj.police=p;
+}
+function pip(fc, pt, key){
+  if(!fc || !fc.features) return "";
+  for(const f of fc.features){ if(turf.booleanPointInPolygon(pt,f)) return f.properties?.[key] || f.properties?.name || ""; }
+  return "";
+}
+function lookup(lat, lon){
+  const pt = turf.point([parseFloat(lon), parseFloat(lat)]);
+  return { WARD:pip(state.gj.wards,pt,"WARD"), BEAT_NO:pip(state.gj.beats,pt,"BEAT_NO"), PS_NAME:pip(state.gj.police,pt,"PS_NAME") };
 }
 
-/* ========= Modals ========= */
-function showOutsideModal(){ els.modalBackdrop.style.display = 'flex'; }
-
-/* ========= FAST OCR: crop bottom overlay ========= */
+/* ========= Crop bottom overlay for OCR ========= */
 async function cropOverlay(dataURL) {
   const blob = await (await fetch(dataURL)).blob();
   const bmp = await createImageBitmap(blob);
@@ -662,98 +595,70 @@ async function cropOverlay(dataURL) {
   return canvas.toDataURL('image/png');
 }
 
-/* ========= Parsers ========= */
-const RE_LATLON  = /Lat(?:itude)?\s*[:=]?\s*([+-]?\d{1,2}\.\d+)[^\d\-+]+Long(?:itude)?\s*[:=]?\s*([+-]?\d{1,3}\.\d+)/i;
-const RE_DATE_TM = /(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\s+(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i;
-const RE_ADDR    = /([A-Za-z0-9 .,\-()]+,\s*[A-Za-z .]+,\s*(?:India|Maharashtra))/ig;
-function parseAll(txt){
-  let out = { date:"", time:"", lat:"", lon:"", address:"" };
-  let m = RE_LATLON.exec(txt); if(m){ out.lat=m[1]; out.lon=m[2]; }
-  m = RE_DATE_TM.exec(txt); if(m){ out.date=m[1]; out.time=(m[2]||"").toUpperCase().trim(); }
-  const addrs = [...txt.matchAll(RE_ADDR)].map(x=>x[1]);
-  if(addrs.length){ out.address = addrs[addrs.length-1].trim(); }
-  if(!(out.lat && out.lon)){
-    const m2 = txt.match(/([+-]?\d{1,2}\.\d+)[,\s]+([+-]?\d{1,3}\.\d+)/);
-    if(m2){ out.lat=m2[1]; out.lon=m2[2]; }
-  }
-  return out;
-}
+/* ========= Upload wiring ========= */
+document.getElementById('drop').addEventListener('click', ()=>document.getElementById('file').click());
+document.getElementById('drop').addEventListener('dragover', e=>{ e.preventDefault(); document.getElementById('drop').style.borderColor="#9ec5ff"; });
+document.getElementById('drop').addEventListener('dragleave', ()=>{ document.getElementById('drop').style.borderColor="#cfe0f3"; });
+document.getElementById('drop').addEventListener('drop', e=>{
+  e.preventDefault(); document.getElementById('drop').style.borderColor="#cfe0f3";
+  const f = e.dataTransfer.files?.[0]; if(!f) return; runPipeline(f);
+});
+document.getElementById('file').addEventListener('change', e=>{
+  const f = e.target.files?.[0]; if(!f) return; runPipeline(f);
+});
 
-/* ========= GeoJSON ========= */
-async function loadGeo(){
-  const [w,b,p] = await Promise.all([
-    fetch(GEOJSON_WARDS_URL).then(r=>r.json()),
-    fetch(GEOJSON_BEATS_URL).then(r=>r.json()),
-    fetch(GEOJSON_POLICE_URL).then(r=>r.json())
-  ]);
-  state.gj.wards=w; state.gj.beats=b; state.gj.police=p;
-}
-function pip(fc, pt, key){
-  if(!fc || !fc.features) return "";
-  for(const f of fc.features){ if(turf.booleanPointInPolygon(pt,f)) return f.properties?.[key] || f.properties?.name || ""; }
-  return "";
-}
-function lookup(lat, lon){
-  const pt = turf.point([parseFloat(lon), parseFloat(lat)]);
-  return {
-    WARD:    pip(state.gj.wards, pt, "WARD"),
-    BEAT_NO: pip(state.gj.beats, pt, "BEAT_NO"),
-    PS_NAME: pip(state.gj.police, pt, "PS_NAME")
-  };
-}
-
-/* ========= CDN CHECK ========= */
-async function probe(url){
+/* ========= Reset ========= */
+async function hardReset(){
   try{
-    const res = await fetch(url, { method:'GET', headers:{ 'Range':'bytes=0-15' }, cache:'no-store', mode:'cors' });
-    return res.ok || res.status === 206 || res.status === 416;
-  }catch(e){ return false; }
+    clearInterval(state.countdownTimer);
+    clearInterval(state.stageTicker);
+    state.stageTicker = null;
+    localStorage.clear(); sessionStorage.clear();
+    if ('caches' in window) { const keys = await caches.keys(); await Promise.all(keys.map(k => caches.delete(k))); }
+    if (indexedDB && indexedDB.databases) { const dbs = await indexedDB.databases(); await Promise.all((dbs||[]).map(db => indexedDB.deleteDatabase(db.name))); }
+    document.cookie.split(";").forEach(c=>{
+      const eq = c.indexOf("="); const name = (eq>-1?c.substr(0,eq):c).trim();
+      if(name) document.cookie = name+"=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
+    });
+  } finally { location.reload(); }
 }
-async function checkCDN(cdn){
-  const okWorker = await probe(cdn.workerPath);
-  let okCore=false, okLang=false;
+document.getElementById('btnReset').addEventListener('click', hardReset);
 
-  for(const base of arr(cdn.corePath)){
-    const a = await probe(base + '/tesseract-core.wasm.js');
-    const b = a ? true : await probe(base + '/tesseract-core-simd.wasm.js');
-    if (a || b) { okCore = true; break; }
-  }
-  for(const base of arr(cdn.langPath)){
-    if (await probe(base + '/eng/4.0.0/eng.traineddata.gz')) { okLang = true; break; }
-  }
-  return okWorker && okCore && okLang;
-}
-function showCDNModal(msg){
-  els.cdnBody.innerHTML = `
-    ${msg || 'Required OCR assets could not be reached from the current network.'}<br/><br/>
-    <strong>Admin:</strong> Huzefa Fakhruddin — <a href="mailto:Care@crescendoits.com">Care@crescendoits.com</a>
-  `;
-  els.cdnBackdrop.style.display = 'flex';
-}
-async function initCDN(){
-  els.cdnPill.textContent = `CDN: Checking ${CDN_CURRENT.name}…`;
-  els.cdnPill.className = 'cdn-pill';
-  const ok = await checkCDN(CDN_CURRENT);
-  if(ok){
-    els.cdnPill.textContent = `CDN: Connected (${CDN_CURRENT.name})`;
-    els.cdnPill.className = 'cdn-pill ok';
-    setStatus("Maps loaded & CDN ready. Upload an image to begin.", "ok");
-    CDN_READY = true;
-  }else{
-    els.cdnPill.textContent = `CDN: Unreachable (${CDN_CURRENT.name})`;
-    els.cdnPill.className = 'cdn-pill err';
-    setStatus("CDN blocked or offline. Open the CDN dialog.", "err");
-    CDN_READY = false;
-    els.cdnBackdrop.style.display = 'flex';
-  }
+/* ========= Modals ========= */
+document.getElementById('modalCancel').addEventListener('click', ()=>{ document.getElementById('modalBackdrop').style.display='none'; });
+document.getElementById('modalReset').addEventListener('click', ()=>{ document.getElementById('modalBackdrop').style.display='none'; hardReset(); });
+document.getElementById('timeoutRetry').addEventListener('click', ()=>{ document.getElementById('timeoutBackdrop').style.display='none'; hardReset(); });
+document.getElementById('timeoutClose').addEventListener('click', ()=>{ document.getElementById('timeoutBackdrop').style.display='none'; });
+document.getElementById('cdnRetry')?.addEventListener('click', ()=>{ document.getElementById('cdnBackdrop').style.display='none'; });
+document.getElementById('cdnUseFallback')?.addEventListener('click', ()=>{ document.getElementById('cdnBackdrop').style.display='none'; });
+
+/* ========= Redirect ========= */
+function startRedirectCountdown(sec){
+  clearInterval(state.countdownTimer);
+  document.getElementById('redirectNote').style.display = 'block';
+  let left = sec;
+  document.getElementById('redirectNote').innerHTML = `All set. Redirecting to Google Form in <span class="countdown">${left}s</span>… <a href="#" id="cancelRedirect">Cancel</a>`;
+  state.countdownTimer = setInterval(()=>{
+    left -= 1;
+    const span = document.querySelector('.countdown');
+    if(span) span.textContent = left + 's';
+    if(left <= 0){
+      clearInterval(state.countdownTimer);
+      window.location.href = buildPrefillURL();
+    }
+  },1000);
+  document.getElementById('redirectNote').onclick = (e)=>{
+    if(e.target && e.target.id === 'cancelRedirect'){
+      e.preventDefault();
+      clearInterval(state.countdownTimer);
+      document.getElementById('redirectNote').innerHTML = `<button id="openFormNow" class="btn">Open Google Form now</button>`;
+      document.getElementById('openFormNow').onclick = ()=>{ window.location.href = buildPrefillURL(); };
+    }
+  };
 }
 
 /* ========= Pipeline ========= */
 async function runPipeline(file){
-  if(!CDN_READY){
-    showCDNModal(`CDN ${CDN_CURRENT.name} is not ready. Please Retry or Switch to fallback.`);
-    return;
-  }
   const myRun = ++state.activeRun;
 
   // Remove dropzone, show image cards
@@ -779,21 +684,22 @@ async function runPipeline(file){
     const cropped = await cropOverlay(dataUrl);
     if(myRun !== state.activeRun) return;
 
-    // End Upload
     endStage(0);
 
-    // Stage 2: OCR (explicit worker with SAFE array paths)
+    // Stage 2: OCR (robust v5 -> v4 fallback)
     startStage(1);
     setStatus("Running OCR…", "warn");
     state.croppedUrl = cropped;
     els.overlayImg.src = state.croppedUrl;
     els.overlayScanner.style.display = "block";
 
-    try {
+    async function ocrWithV5() {
+      if (window.__OCR_VERSION__ !== 'v5') throw new Error('v5 not loaded');
+      const cfg = window.__OCR_CDNS__.v5;
       const worker = await Tesseract.createWorker({
-        workerPath: CDN_CURRENT.workerPath,
-        corePath:   CDN_CURRENT.corePath, // already arrays (patched)
-        langPath:   CDN_CURRENT.langPath  // already arrays (patched)
+        workerPath: cfg.workerPath,
+        corePath:   cfg.corePath,
+        langPath:   cfg.langPath
       });
       await worker.loadLanguage('eng');
       await worker.initialize('eng');
@@ -803,115 +709,80 @@ async function runPipeline(file){
           "0123456789:/.-,+() APMapm°'\"IndiaMaharashtraMumbaiAndheriVersovaRoadRdWestEastNorthSouth",
         user_defined_dpi: "200"
       });
-
-      const { data: { text } } = await worker.recognize(state.croppedUrl);
-      await worker.terminate();
-      els.overlayScanner.style.display = "none";
-      endStage(1);
-
-      // Stage 3: Parse
-      startStage(2);
-      setStatus("Parsing extracted text…", "warn");
-      Object.assign(state.data, parseAll(text));
-      renderIncremental();
-      endStage(2);
-
-      // Stage 4: GeoJSON
-      startStage(3);
-      setStatus("GeoJSON lookup…", "warn");
-      let g = {WARD:"",BEAT_NO:"",PS_NAME:""};
-      state.outside = false;
-      if(state.data.lat && state.data.lon){
-        g = lookup(state.data.lat, state.data.lon);
-        Object.assign(state.data, {WARD:g.WARD, BEAT_NO:g.BEAT_NO, PS_NAME:g.PS_NAME});
-        renderIncremental();
-        if(!g.WARD){ state.outside = true; }
-      } else { state.outside = true; }
-      endStage(3);
-
-      if(state.outside){ setStatus("Outside MCGM Boundaries — Not allowed.", "err"); showOutsideModal(); return; }
-
-      // Stage 5: Review
-      startStage(4); setStatus("Ready. Review the results.", "ok"); endStage(4);
-
-      // Stage 6: Redirect
-      startStage(5); startRedirectCountdown(5);
-
-    } catch (e) {
-      console.error("Worker OCR failed:", e);
-      els.overlayScanner.style.display = "none";
-      setStatus("OCR could not complete. Tap Retry.", "err");
-      onStageTimeout(1);
+      const { data:{ text } } = await worker.recognize(state.croppedUrl);
+      await worker.terminate(); return text;
     }
+    async function ocrWithV4() {
+      if (window.__OCR_VERSION__ !== 'v4') {
+        await new Promise((res,rej)=>{
+          const s=document.createElement('script');
+          s.src=window.__OCR_CDNS__.v4.script + '?v=fix'; s.onload=res; s.onerror=rej; document.head.appendChild(s);
+        });
+        window.__OCR_VERSION__='v4';
+      }
+      const { data:{ text } } = await Tesseract.recognize(state.croppedUrl, 'eng', {});
+      return text;
+    }
+
+    let text = "";
+    try { text = await ocrWithV5(); }
+    catch (e) {
+      console.warn('v5 OCR failed, switching to v4:', e?.message || e);
+      try { text = await ocrWithV4(); }
+      catch (e2) {
+        console.error('v4 OCR also failed:', e2);
+        els.overlayScanner.style.display = "none";
+        setStatus("OCR failed in both engines. Please Retry.", "err");
+        onStageTimeout(1);
+        return;
+      }
+    }
+
+    els.overlayScanner.style.display = "none";
+    endStage(1);
+
+    // Stage 3: Parse
+    startStage(2);
+    setStatus("Parsing extracted text…", "warn");
+    Object.assign(state.data, parseAll(text));
+    renderIncremental();
+    endStage(2);
+
+    // Stage 4: GeoJSON
+    startStage(3);
+    setStatus("GeoJSON lookup…", "warn");
+    let g = {WARD:"",BEAT_NO:"",PS_NAME:""};
+    state.outside = false;
+    if(state.data.lat && state.data.lon){
+      g = lookup(state.data.lat, state.data.lon);
+      Object.assign(state.data, {WARD:g.WARD, BEAT_NO:g.BEAT_NO, PS_NAME:g.PS_NAME});
+      renderIncremental();
+      if(!g.WARD){ state.outside = true; }
+    } else { state.outside = true; }
+    endStage(3);
+
+    if(state.outside){
+      setStatus("Outside MCGM Boundaries — Not allowed.", "err");
+      document.getElementById('modalBackdrop').style.display = 'flex';
+      return;
+    }
+
+    // Stage 5: Review
+    startStage(4); setStatus("Ready. Review the results.", "ok"); endStage(4);
+
+    // Stage 6: Redirect
+    startStage(5); startRedirectCountdown(5);
   };
   reader.readAsDataURL(file);
 }
 
-/* ========= Upload wiring ========= */
-els.drop.addEventListener('click', ()=>els.file.click());
-els.drop.addEventListener('dragover', e=>{ e.preventDefault(); els.drop.style.borderColor="#9ec5ff"; });
-els.drop.addEventListener('dragleave', ()=>{ els.drop.style.borderColor="#cfe0f3"; });
-els.drop.addEventListener('drop', e=>{
-  e.preventDefault(); els.drop.style.borderColor="#cfe0f3";
-  const f = e.dataTransfer.files?.[0]; if(!f) return;
-  runPipeline(f);
-});
-els.file.addEventListener('change', e=>{
-  const f = e.target.files?.[0]; if(!f) return;
-  runPipeline(f);
-});
-
-/* ========= Reset ========= */
-async function hardReset(){
-  try{
-    clearInterval(state.countdownTimer);
-    clearInterval(state.stageTicker);
-    state.stageTicker = null;
-    localStorage.clear(); sessionStorage.clear();
-    if ('caches' in window) {
-      const keys = await caches.keys();
-      await Promise.all(keys.map(k => caches.delete(k)));
-    }
-    if (indexedDB && indexedDB.databases) {
-      const dbs = await indexedDB.databases();
-      await Promise.all((dbs||[]).map(db => indexedDB.deleteDatabase(db.name)));
-    }
-    document.cookie.split(";").forEach(c=>{
-      const eq = c.indexOf("="); const name = (eq>-1?c.substr(0,eq):c).trim();
-      if(name) document.cookie = name+"=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
-    });
-  } finally {
-    location.reload();
-  }
-}
-document.getElementById('btnReset').addEventListener('click', hardReset);
-
-/* Modals */
-document.getElementById('modalCancel').addEventListener('click', ()=>{ document.getElementById('modalBackdrop').style.display='none'; });
-document.getElementById('modalReset').addEventListener('click', ()=>{ document.getElementById('modalBackdrop').style.display='none'; hardReset(); });
-
-document.getElementById('timeoutRetry').addEventListener('click', ()=>{ document.getElementById('timeoutBackdrop').style.display='none'; hardReset(); });
-document.getElementById('timeoutClose').addEventListener('click', ()=>{ document.getElementById('timeoutBackdrop').style.display='none'; });
-
-document.getElementById('cdnRetry').addEventListener('click', async ()=>{ document.getElementById('cdnBackdrop').style.display='none'; await initCDN(); });
-document.getElementById('cdnUseFallback').addEventListener('click', async ()=>{
-  window.CDN_CURRENT = Object.assign({}, CDN_FALLBACK);
-  document.getElementById('cdnBackdrop').style.display='none';
-  await initCDN();
-});
-document.getElementById('cdnClose').addEventListener('click', ()=>{ document.getElementById('cdnBackdrop').style.display='none'; });
-
 /* ========= Bootstrap ========= */
 (async ()=>{
-  try{
-    await loadGeo();
-    setStatus("Maps loaded. Checking CDN…", "ok");
-  }catch(e){
-    console.error(e);
-    setStatus("Could not load GeoJSON (check /data paths / CORS).", "err");
-  }
+  try{ await loadGeo(); setStatus("Maps loaded. Upload an image to begin.", "ok"); }
+  catch(e){ console.error(e); setStatus("Could not load GeoJSON (check /data paths / CORS).", "err"); }
   updateStageTimes();
-  await initCDN(); // check worker/core/lang & set CDN_READY
+  // set version text (footer)
+  document.getElementById('appVersion').textContent = 'v2025.08.17';
 })();
 </script>
 </body>
