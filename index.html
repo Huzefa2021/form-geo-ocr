@@ -1,136 +1,435 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<title>MCGM | Abandoned Vehicles Portal</title>
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<style>
-/* ===== MCGM Theme ===== */
-:root{
-  --mcgm-blue:#004080; 
-  --mcgm-orange:#ff9933;
-  --bg:#0a2540; --bg-2:#0e2f55;
-  --card:#102a4a;
-  --accent:#f0b429; --accent-2:#ffd166;
-  --muted:#a7c0de; --fg:#e7f0fb;
-  --line:#224b78;
-  --ok:#16a34a; --warn:#f59e0b; --err:#ef4444;
-  --chip:#0d3566;
-}
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:Segoe UI,Roboto,Arial,sans-serif; background:linear-gradient(180deg,var(--bg),var(--bg-2)); color:var(--fg);}
-a{color:var(--accent)}
-.wrap{max-width:1000px; margin:32px auto; padding:0 16px}
+  <meta charset="utf-8" />
+  <title>MCGM | Abandoned Vehicles – Marshal Upload Portal</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
 
-/* ===== Header Banner ===== */
-header{background:var(--mcgm-blue); color:#fff; padding:14px 20px; display:flex; align-items:center; gap:16px; border-bottom:4px solid var(--mcgm-orange);}
-header img{height:60px}
-header .title{font-size:22px; font-weight:800}
-header .sub{font-size:14px; opacity:.9}
+  <!-- Fonts: Roboto (Latin) + Noto Sans Devanagari (Indic scripts) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Noto+Sans+Devanagari:wght@400;500;700&display=swap" rel="stylesheet">
 
-/* ===== Footer ===== */
-footer{background:var(--mcgm-blue); color:#fff; padding:14px 20px; margin-top:30px; border-top:4px solid var(--mcgm-orange); font-size:13px; text-align:center; line-height:1.6}
-footer a{color:var(--mcgm-orange); font-weight:600}
+  <style>
+    :root{
+      --mcgm-blue:#0b5aa3;
+      --mcgm-blue-dark:#0a4a87;
+      --mcgm-orange:#ff9933;
+      --bg:#f5f7fb;
+      --fg:#0d2438;
+      --muted:#5b6b7a;
+      --line:#dde6f1;
+      --card:#ffffff;
+      --ok:#198754; --warn:#f59e0b; --err:#dc3545;
+      --accent:#0b5aa3;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      color:var(--fg);
+      background:var(--bg);
+      font-family:"Roboto","Noto Sans Devanagari","Segoe UI",Arial,Helvetica,sans-serif;
+      -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
+    }
+    a{color:var(--mcgm-blue); text-decoration:none}
+    a:hover{text-decoration:underline}
 
-/* ===== Cards / UI ===== */
-.card{background:rgba(16,42,74,.85); border:1px solid var(--line); border-radius:14px; padding:18px; margin-top:14px}
-.title{font-size:18px; font-weight:700; margin-bottom:8px}
-.milestones{display:flex; gap:12px; flex-wrap:wrap; margin-bottom:8px}
-.chip{display:flex; align-items:center; gap:8px; padding:6px 12px; border-radius:999px; background:var(--chip); border:1px solid var(--line); font-size:13px}
-.chip .dot{width:8px; height:8px; border-radius:50%; background:#789fce}
-.chip.active .dot{background:var(--accent)}
-.chip.done .dot{background:var(--ok)}
-.bar{position:relative; height:10px; border-radius:999px; background:#0b315c; border:1px solid var(--line); overflow:hidden}
-.bar-fill{position:absolute; inset:0; width:0%; background:linear-gradient(90deg,var(--accent),var(--accent-2)); transition:width .4s ease}
-.dropzone{border:2px dashed var(--line); border-radius:14px; min-height:180px; display:grid; place-items:center; text-align:center; cursor:pointer; transition:.2s; padding:18px; background:#0b315c26}
-.dropzone:hover{border-color:#3e6ea6}
-.dz-title{font-weight:700}
-.dz-hint{color:var(--muted); font-size:13px}
-label{font-size:12px; color:#bed3ea; display:block; margin:6px 0}
-input[type="text"]{width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:#0b2e57; color:var(--fg)}
-.btns{display:flex; gap:12px; flex-wrap:wrap; margin-top:12px}
-button{padding:10px 14px; border-radius:10px; border:1px solid var(--line); background:#0b2e57; color:var(--fg); cursor:pointer}
-button.primary{background:var(--accent); color:#2b1a03; font-weight:700}
-.status{margin-top:8px; font-size:13px}
-.status.ok{color:var(--ok)} .status.warn{color:var(--warn)} .status.err{color:var(--err)}
-.panel{display:grid; gap:6px}
-.kv{display:grid; grid-template-columns:120px 1fr; gap:8px; align-items:center; font-size:13px; padding:3px 0; border-bottom:1px dashed #1b4676}
-.kv:last-child{border:0}
-.mono{font-family:ui-monospace,Menlo,Consolas,monospace; word-break:break-word}
-.scanner-container{position:relative; display:inline-block; margin-top:12px}
-.preview{max-width:260px; border-radius:10px; border:1px solid var(--line)}
-.scanner{position:absolute; top:0; left:0; right:0; height:20%; border-radius:10px;
-  background:linear-gradient(to bottom, rgba(240,180,41,.5), rgba(240,180,41,0));
-  display:none; animation:scanMove 3s linear infinite;}
-@keyframes scanMove{0%{top:0;}100%{top:100%;}}
-</style>
+    /* Header & Top Nav */
+    .topbar{
+      background:var(--mcgm-blue);
+      color:#fff;
+      border-bottom:4px solid var(--mcgm-orange);
+    }
+    .topbar-inner{
+      max-width:1180px; margin:0 auto; padding:12px 16px;
+      display:flex; align-items:center; gap:14px;
+    }
+    .topbar img{height:58px; width:auto}
+    .brand-title{font-weight:700; font-size:20px; line-height:1.2}
+    .brand-sub{font-size:13px; opacity:.9}
 
-<!-- Tesseract.js + Turf.js -->
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.2.0/turf.min.js"></script>
+    /* Breadcrumb strip (MCGM vibe) */
+    .crumbs{
+      background:#eef4fb; border-bottom:1px solid var(--line);
+    }
+    .crumbs-inner{
+      max-width:1180px; margin:0 auto; padding:8px 16px; font-size:13px; color:#43648a;
+    }
+    .crumbs-inner a{color:#2f5f9a}
+
+    /* Page container */
+    .wrap{max-width:1180px; margin:22px auto; padding:0 16px}
+
+    /* Cards */
+    .card{
+      background:var(--card); border:1px solid var(--line); border-radius:12px;
+      box-shadow:0 4px 16px rgba(16,38,74,.04);
+      margin-bottom:18px;
+    }
+    .card .hdr{
+      padding:14px 16px; border-bottom:1px solid var(--line);
+      display:flex; align-items:center; gap:10px;
+    }
+    .card .hdr .title{font-weight:700; color:#143a63}
+    .card .body{padding:16px}
+
+    /* Milestones */
+    .milestones{display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px}
+    .chip{
+      display:inline-flex; align-items:center; gap:8px; padding:6px 10px;
+      border-radius:999px; border:1px solid var(--line); background:#f4f8ff; color:#0c3963; font-size:12.5px;
+    }
+    .chip .dot{width:8px; height:8px; border-radius:50%; background:#9ec5ff}
+    .chip.active .dot{background:#ffd166}
+    .chip.done .dot{background:#37b24d}
+
+    /* Progress bar */
+    .bar{height:8px; border-radius:999px; background:#e9f1fb; border:1px solid var(--line); overflow:hidden}
+    .bar-fill{height:100%; width:0%; background:linear-gradient(90deg,#ffbd59,#ffd166); transition:width .35s ease}
+
+    /* Dropzone */
+    .drop{
+      border:2px dashed #cfe0f3; border-radius:12px; min-height:140px;
+      display:grid; place-items:center; text-align:center; padding:18px; cursor:pointer; background:#fbfdff;
+    }
+    .drop:hover{border-color:#9ec5ff; background:#f6fbff}
+    .dz-title{font-weight:600; color:#133a62}
+    .dz-hint{font-size:12px; color:var(--muted)}
+
+    /* Scanner preview */
+    .scanwrap{display:none; margin-top:12px}
+    .scanner-container{position:relative; display:inline-block}
+    .preview{max-width:280px; border-radius:10px; border:1px solid var(--line)}
+    .scanner{
+      position:absolute; top:0; left:0; right:0; height:20%;
+      background:linear-gradient(to bottom, rgba(255,187,68,.45), rgba(255,187,68,0));
+      border-radius:10px; display:none; animation:scanMove 3s linear infinite;
+    }
+    @keyframes scanMove{0%{top:0;}100%{top:100%;}}
+
+    /* Results (read-only) */
+    .kv{display:grid; grid-template-columns:220px 1fr; gap:10px; align-items:center; padding:8px 0; border-bottom:1px dashed #e4edf7}
+    .kv:last-child{border-bottom:0}
+    .k{font-weight:600; color:#0f3468}
+    .v{font-family:ui-monospace,Menlo,Consolas,monospace; color:#1b3d62; word-break:break-word}
+
+    /* Buttons & status */
+    .actions{display:flex; gap:12px; flex-wrap:wrap; margin-top:12px}
+    .btn{padding:10px 14px; border-radius:8px; border:1px solid #cfe0f3; background:#f7fbff; color:#0c3963; cursor:pointer; font-weight:600}
+    .btn.primary{background:var(--mcgm-orange); border-color:var(--mcgm-orange); color:#422306}
+    .status{font-size:13px; margin-top:8px}
+    .ok{color:var(--ok)} .warn{color:var(--warn)} .err{color:var(--err)}
+
+    /* Footer */
+    footer{
+      margin-top:24px; background:var(--mcgm-blue-dark); color:#e9f2fb; border-top:3px solid var(--mcgm-orange);
+    }
+    .footer-inner{max-width:1180px; margin:0 auto; padding:16px; font-size:13px; text-align:center}
+    .footer-inner a{color:#ffd166; font-weight:600}
+  </style>
+
+  <!-- OCR + Geo libs -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.2.0/turf.min.js"></script>
 </head>
 <body>
-<!-- ===== HEADER ===== -->
-<header>
-  <img src="https://upload.wikimedia.org/wikipedia/commons/5/52/Brihanmumbai_Municipal_Corporation_logo.png" alt="MCGM Logo" />
-  <div>
-    <div class="title">Municipal Corporation of Greater Mumbai</div>
-    <div class="sub">Abandoned Vehicles – Identification & Pre-Notice Portal</div>
-  </div>
-</header>
 
-<div class="wrap">
-
-  <!-- Progress -->
-  <div class="card">
-    <div class="milestones" id="chips">
-      <div class="chip" data-step="1"><span class="dot"></span>Upload</div>
-      <div class="chip" data-step="2"><span class="dot"></span>OCR</div>
-      <div class="chip" data-step="3"><span class="dot"></span>Parse</div>
-      <div class="chip" data-step="4"><span class="dot"></span>GeoJSON</div>
-      <div class="chip" data-step="5"><span class="dot"></span>Review</div>
-      <div class="chip" data-step="6"><span class="dot"></span>Redirect</div>
-    </div>
-    <div class="bar"><div class="bar-fill" id="barFill"></div></div>
-  </div>
-
-  <!-- Upload + Preview -->
-  <div class="card">
-    <div class="title">Upload Image</div>
-    <div id="dropzone" class="dropzone"><div><div class="dz-title">Drag & Drop image</div><div class="dz-hint">or click to choose</div></div></div>
-    <input id="fileInput" type="file" accept="image/*" style="display:none" />
-    <div class="scanner-container"><img id="previewImg" class="preview" alt=""><div id="scannerOverlay" class="scanner"></div></div>
-    <div class="btns"><button id="btnProcess">Run OCR & Geo</button><button id="btnContinue" class="primary">Continue to Form</button></div>
-    <div id="status" class="status"></div>
-  </div>
-
-  <!-- Results -->
-  <div class="card">
-    <div class="title">Results</div>
-    <div class="panel">
-      <div class="kv"><div>Date</div><div><input id="fDate"></div></div>
-      <div class="kv"><div>Time</div><div><input id="fTime"></div></div>
-      <div class="kv"><div>Latitude</div><div><input id="fLat"></div></div>
-      <div class="kv"><div>Longitude</div><div><input id="fLon"></div></div>
-      <div class="kv"><div>Address</div><div><input id="fAddr"></div></div>
-      <div class="kv"><div>Ward</div><div><input id="fWard"></div></div>
-      <div class="kv"><div>Beat</div><div><input id="fBeat"></div></div>
-      <div class="kv"><div>Police</div><div><input id="fPS"></div></div>
-      <div class="kv"><div>Prefill URL</div><div class="mono" id="prefillEcho"></div></div>
+  <!-- HEADER -->
+  <div class="topbar">
+    <div class="topbar-inner">
+      <img src="https://www.mcgm.gov.in/com.mcgm.newframework/images/logo_V1.png" alt="BMC/MCGM" />
+      <div>
+        <div class="brand-title">Municipal Corporation of Greater Mumbai</div>
+        <div class="brand-sub">Abandoned Vehicles – Identification & Pre-Notice (Marshal Upload)</div>
+      </div>
     </div>
   </div>
-</div>
 
-<!-- ===== FOOTER ===== -->
-<footer>
-  &copy; 2025 Municipal Corporation of Greater Mumbai (MCGM) <br>
-  Designed for internal use by Field Marshals & Supervisors. <br>
-  For assistance contact: <a href="#">mcgm-Ptradingmumbai@gmail.com</a> | Helpline: 9987013652
-</footer>
+  <!-- BREADCRUMBS -->
+  <div class="crumbs">
+    <div class="crumbs-inner">
+      <a href="https://www.mcgm.gov.in" target="_blank" rel="noopener">Home</a> ›
+      Abandoned Vehicles › Marshal Upload
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="wrap">
+
+    <!-- Upload -->
+    <div class="card">
+      <div class="hdr"><div class="title">Upload Photo</div></div>
+      <div class="body">
+        <div id="drop" class="drop">
+          <div>
+            <div class="dz-title">Drag & Drop image</div>
+            <div class="dz-hint">or click to choose (JPG / PNG from GPS Map Camera)</div>
+          </div>
+        </div>
+        <input id="file" type="file" accept="image/*" hidden />
+        <div id="scanwrap" class="scanwrap">
+          <div class="scanner-container">
+            <img id="preview" class="preview" alt="preview"/>
+            <div id="scanner" class="scanner"></div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button id="btnRun" class="btn">Run OCR & Geo</button>
+          <button id="btnGo" class="btn primary">Continue to Google Form</button>
+        </div>
+        <div id="status" class="status">Awaiting upload…</div>
+      </div>
+    </div>
+
+    <!-- Progress -->
+    <div class="card">
+      <div class="hdr"><div class="title">Progress</div></div>
+      <div class="body">
+        <div class="milestones">
+          <div class="chip" id="ms1"><span class="dot"></span>Upload</div>
+          <div class="chip" id="ms2"><span class="dot"></span>OCR</div>
+          <div class="chip" id="ms3"><span class="dot"></span>Parse</div>
+          <div class="chip" id="ms4"><span class="dot"></span>GeoJSON</div>
+          <div class="chip" id="ms5"><span class="dot"></span>Review</div>
+          <div class="chip" id="ms6"><span class="dot"></span>Redirect</div>
+        </div>
+        <div class="bar"><div id="bar" class="bar-fill"></div></div>
+      </div>
+    </div>
+
+    <!-- Results (READ-ONLY) -->
+    <div class="card">
+      <div class="hdr"><div class="title">Results</div></div>
+      <div class="body" id="results">
+        <!-- rows will be injected as read-only key/value -->
+      </div>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <footer>
+    <div class="footer-inner">
+      &copy; 2025 Municipal Corporation of Greater Mumbai (MCGM) • <a href="https://www.mcgm.gov.in" target="_blank" rel="noopener">www.mcgm.gov.in</a>
+    </div>
+  </footer>
 
 <script>
-/* === SAME SCRIPT from earlier (OCR + GeoJSON + Prefill builder) === */
-/* ... Keep the JavaScript block from my last version unchanged ... */
+/* =========================
+   CONFIG: Form + GeoJSON
+   ========================= */
+const FORM_ID = "1FAIpQLSeo-xlOSxvG0IwtO5MkKaTJZNJkgTsmgZUw-FBsntFlNdRnCw";
+const ENTRY = {
+  date:    "entry.1911996449",
+  time:    "entry.1421115881",
+  lon:     "entry.113122688",  // 0
+  lat:     "entry.419288992",  // 1
+  ward:    "entry.1625337207", // 2
+  beat:    "entry.1058310891", // 3
+  address: "entry.1188611077", // 4
+  police:  "entry.1555105834"  // 5
+};
+const GEOJSON_WARDS_URL  = "./data/wards.geojson";
+const GEOJSON_BEATS_URL  = "./data/beats.geojson";
+const GEOJSON_POLICE_URL = "./data/police_jurisdiction.geojson";
+
+/* =========================
+   State & Elements
+   ========================= */
+const els = {
+  drop: document.getElementById('drop'),
+  file: document.getElementById('file'),
+  scanwrap: document.getElementById('scanwrap'),
+  scanner: document.getElementById('scanner'),
+  preview: document.getElementById('preview'),
+  btnRun: document.getElementById('btnRun'),
+  btnGo: document.getElementById('btnGo'),
+  status: document.getElementById('status'),
+  bar: document.getElementById('bar'),
+  results: document.getElementById('results'),
+  ms:[document.getElementById('ms1'),document.getElementById('ms2'),document.getElementById('ms3'),
+      document.getElementById('ms4'),document.getElementById('ms5'),document.getElementById('ms6')]
+};
+let currentFile = null;
+let ocrText = "";
+let data = { date:"", time:"", lat:"", lon:"", address:"", WARD:"", BEAT_NO:"", PS_NAME:"" };
+let gj = { wards:null, beats:null, police:null };
+
+/* =========================
+   Helpers
+   ========================= */
+function mark(step){ // 1..6
+  els.ms.forEach((chip,i)=>{
+    chip.classList.remove('active','done');
+    if(i < step-1) chip.classList.add('done');
+    if(i === step-1) chip.classList.add('active');
+  });
+  const pct = ((step-1)/5)*100;
+  els.bar.style.width = pct + '%';
+}
+function setStatus(msg, cls){ els.status.className = 'status ' + (cls||''); els.status.textContent = msg; }
+function kvRow(k, v){
+  const row = document.createElement('div');
+  row.className='kv';
+  row.innerHTML = `<div class="k">${k}</div><div class="v">${v || '—'}</div>`;
+  return row;
+}
+function renderResults(){
+  els.results.innerHTML = '';
+  els.results.appendChild(kvRow('Date', data.date));
+  els.results.appendChild(kvRow('Time', data.time));
+  els.results.appendChild(kvRow('Latitude', data.lat));
+  els.results.appendChild(kvRow('Longitude', data.lon));
+  els.results.appendChild(kvRow('Address', data.address));
+  els.results.appendChild(kvRow('Ward', data.WARD));
+  els.results.appendChild(kvRow('Beat No.', data.BEAT_NO));
+  els.results.appendChild(kvRow('Police Station', data.PS_NAME));
+}
+
+function buildPrefillURL(){
+  const p = new URLSearchParams({
+    [ENTRY.date]:    data.date || "",
+    [ENTRY.time]:    data.time || "",
+    [ENTRY.lon]:     data.lon  || "",
+    [ENTRY.lat]:     data.lat  || "",
+    [ENTRY.ward]:    data.WARD || "",
+    [ENTRY.beat]:    data.BEAT_NO || "",
+    [ENTRY.address]: data.address || "",
+    [ENTRY.police]:  data.PS_NAME || "",
+    usp: "pp_url"
+  });
+  return `https://docs.google.com/forms/d/e/${FORM_ID}/viewform?${p.toString()}`;
+}
+
+/* =========================
+   Parsers (overlay patterns)
+   ========================= */
+const RE_LATLON  = /Lat(?:itude)?\s*[:=]?\s*([+-]?\d{1,2}\.\d+)[^\d\-+]+Long(?:itude)?\s*[:=]?\s*([+-]?\d{1,3}\.\d+)/i;
+const RE_DATE_TM = /(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\s+(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i;
+const RE_ADDR    = /([A-Za-z0-9 .,\-()]+,\s*[A-Za-z .]+,\s*(?:India|Maharashtra))/ig;
+
+function parseAll(txt){
+  let out = { date:"", time:"", lat:"", lon:"", address:"" };
+  let m = RE_LATLON.exec(txt); if(m){ out.lat=m[1]; out.lon=m[2]; }
+  m = RE_DATE_TM.exec(txt); if(m){ out.date=m[1]; out.time=(m[2]||"").toUpperCase().trim(); }
+  const addrs = [...txt.matchAll(RE_ADDR)].map(x=>x[1]);
+  if(addrs.length){ out.address = addrs[addrs.length-1].trim(); }
+  if(!(out.lat && out.lon)){
+    const m2 = txt.match(/([+-]?\d{1,2}\.\d+)[,\s]+([+-]?\d{1,3}\.\d+)/);
+    if(m2){ out.lat=m2[1]; out.lon=m2[2]; }
+  }
+  return out;
+}
+
+/* =========================
+   GeoJSON lookup
+   ========================= */
+async function loadGeo(){
+  const [w,b,p] = await Promise.all([
+    fetch(GEOJSON_WARDS_URL).then(r=>r.json()),
+    fetch(GEOJSON_BEATS_URL).then(r=>r.json()),
+    fetch(GEOJSON_POLICE_URL).then(r=>r.json())
+  ]);
+  gj.wards=w; gj.beats=b; gj.police=p;
+}
+function lookup(lat, lon){
+  const pt = turf.point([parseFloat(lon), parseFloat(lat)]);
+  function pip(fc,key){
+    if(!fc || !fc.features) return "";
+    for(const f of fc.features){
+      if(turf.booleanPointInPolygon(pt,f)) return f.properties?.[key] || f.properties?.name || "";
+    }
+    return "";
+  }
+  return {
+    WARD:    pip(gj.wards,"WARD"),
+    BEAT_NO: pip(gj.beats,"BEAT_NO"),
+    PS_NAME: pip(gj.police,"PS_NAME")
+  };
+}
+
+/* =========================
+   OCR pipeline
+   ========================= */
+async function runOCR(imgDataUrl){
+  mark(2); setStatus("Running OCR…", "warn"); els.scanner.style.display="block";
+  const worker = await Tesseract.createWorker('eng');
+  const { data: { text } } = await worker.recognize(imgDataUrl, { logger: m => {
+    if(m.status) setStatus(`OCR: ${m.status} ${Math.round((m.progress||0)*100)}%`, "warn");
+  }});
+  await worker.terminate();
+  els.scanner.style.display="none";
+  ocrText = text;
+  mark(3); setStatus("Parsing extracted text…", "warn");
+  const parsed = parseAll(text);
+  data.date = parsed.date; data.time = parsed.time;
+  data.lat = parsed.lat; data.lon = parsed.lon; data.address = parsed.address;
+  renderResults();
+
+  mark(4); setStatus("GeoJSON lookup in progress…", "warn");
+  if(data.lat && data.lon){
+    const g = lookup(data.lat, data.lon);
+    data.WARD   = g.WARD;
+    data.BEAT_NO= g.BEAT_NO;
+    data.PS_NAME= g.PS_NAME;
+    renderResults();
+  }
+  mark(5); setStatus("Review the results and continue.", "ok");
+}
+
+/* =========================
+   UI wiring
+   ========================= */
+els.drop.addEventListener('click', ()=>els.file.click());
+els.drop.addEventListener('dragover', e=>{ e.preventDefault(); els.drop.style.borderColor="#9ec5ff"; });
+els.drop.addEventListener('dragleave', ()=>{ els.drop.style.borderColor="#cfe0f3"; });
+els.drop.addEventListener('drop', e=>{
+  e.preventDefault(); els.drop.style.borderColor="#cfe0f3";
+  const f = e.dataTransfer.files?.[0]; if(!f) return;
+  currentFile = f; previewFile(f);
+});
+els.file.addEventListener('change', e=>{
+  const f = e.target.files?.[0]; if(!f) return;
+  currentFile = f; previewFile(f);
+});
+
+function previewFile(f){
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    els.scanwrap.style.display='block';
+    els.preview.src = reader.result;
+    mark(1); setStatus("Image loaded. Click 'Run OCR & Geo'.", "ok");
+  };
+  reader.readAsDataURL(f);
+}
+
+els.btnRun.addEventListener('click', ()=>{
+  if(!currentFile){ setStatus("Please upload an image first.", "warn"); return;}
+  const reader = new FileReader();
+  reader.onload = ()=> runOCR(reader.result);
+  reader.readAsDataURL(currentFile);
+});
+
+els.btnGo.addEventListener('click', ()=>{
+  if(!data.lon || !data.lat){
+    setStatus("Longitude & Latitude are required before continuing.", "warn");
+    return;
+  }
+  mark(6); setStatus("Redirecting to Google Form…", "ok");
+  window.location.href = buildPrefillURL();
+});
+
+/* Bootstrap */
+(async ()=>{
+  try{
+    await loadGeo();
+    setStatus("Maps loaded. Upload an image to begin.", "ok");
+  }catch(e){
+    console.error(e);
+    setStatus("Could not load GeoJSON (check /data paths / CORS).", "err");
+  }
+  mark(1);
+})();
 </script>
 </body>
 </html>
