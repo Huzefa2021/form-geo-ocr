@@ -2,9 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>MCGM | Abandoned Vehicles – Marshal Upload</title>
   <link rel="icon" href="favicon.ico">
   <link rel="preconnect" href="https://cdn.jsdelivr.net" />
@@ -13,7 +11,7 @@
 </head>
 <body>
 
-  <!-- Sticky Header -->
+  <!-- Sticky Header (saffron line at bottom) -->
   <header class="app-header">
     <div class="brand">
       <img class="bmc-logo" src="https://www.mcgm.gov.in/com.mcgm.newframework/images/logo_V1.png" alt="MCGM" />
@@ -37,7 +35,7 @@
     </div>
   </header>
 
-  <!-- Chips + progress -->
+  <!-- Chips + progress + rail info (elapsed + status) -->
   <div class="top-rail">
     <ul class="milestones">
       <li class="chip" data-i="0">Upload</li>
@@ -47,7 +45,15 @@
       <li class="chip" data-i="4">Review</li>
       <li class="chip" data-i="5">Redirect</li>
     </ul>
+
     <div class="progress"><span id="bar"></span></div>
+
+    <!-- NEW: rail info right below the bar -->
+    <div class="rail-info">
+      <span id="railStatus" class="status">Initializing…</span>
+      <span id="railTimes" class="times">Upload — 0.0s • OCR — 0.0s • Parse — 0.0s • GeoJSON — 0.0s • Review — 0.0s • Redirect — 0.0s</span>
+    </div>
+
     <div class="cdn-pill" id="cdnPill">CDN: checking…</div>
   </div>
 
@@ -56,10 +62,10 @@
     <a href="#">Home</a> › <a href="#">Abandoned Vehicles</a> › <span>Marshal Upload</span>
   </nav>
 
-  <!-- Main content -->
+  <!-- Content -->
   <main class="container">
     <section class="grid">
-      <!-- Left column -->
+      <!-- Left Column -->
       <div>
         <div class="card" id="dropCard">
           <h3>Upload Photo</h3>
@@ -74,7 +80,7 @@
 
         <div class="card hidden" id="originalCard">
           <h3>Original Photo (25%)</h3>
-          <div class="img-wrap center">
+          <div class="img-wrap center original-25">
             <img id="originalImg" alt="original preview" />
           </div>
         </div>
@@ -88,41 +94,34 @@
         </div>
       </div>
 
-      <!-- Right column -->
+      <!-- Right Column -->
       <div>
         <div class="card">
           <h3>Results</h3>
-          <div id="results"><!-- rows inserted by JS --></div>
+          <div id="results"></div>
           <div id="resultsNote" class="note">Results will be populated post processing.</div>
         </div>
       </div>
     </section>
 
-    <div class="statusbar">
-      <span id="status" class="status">Initializing…</span>
-      <span id="stageTimes" class="times">
-        Upload — 0.0s • OCR — 0.0s • Parse — 0.0s • GeoJSON — 0.0s • Review — 0.0s • Redirect — 0.0s
-      </span>
-    </div>
-
     <div id="redirectNote" class="redirect hidden"></div>
   </main>
 
-  <!-- Sticky Footer -->
+  <!-- Sticky Footer (two rows, saffron line at top) -->
   <footer class="app-footer">
-    <div class="footer-left">
+    <div class="footer-row">
       <strong>Developed by</strong> Crescendo Innovative Solutions LLP ·
       <strong>Admin:</strong> Huzefa Fakhruddin —
       <a href="mailto:Care@crescendoits.com">Care@crescendoits.com</a>
-      · © 2025 Municipal Corporation of Greater Mumbai (MCGM) —
-      <a href="https://www.mcgm.gov.in" target="_blank" rel="noopener">www.mcgm.gov.in</a>
     </div>
-    <div class="footer-right">
-      Build: <span id="appVersion">—</span>
+    <div class="footer-row">
+      © 2025 Municipal Corporation of Greater Mumbai (MCGM) —
+      <a href="https://www.mcgm.gov.in" target="_blank" rel="noopener">www.mcgm.gov.in</a>
+      <span class="build"> | Build: <span id="appVersion">—</span></span>
     </div>
   </footer>
 
-  <!-- Generic Modal -->
+  <!-- Modals -->
   <div id="modalBackdrop" class="modal-backdrop" style="display:none;">
     <div class="modal">
       <h3 id="modalTitle">Notice</h3>
@@ -134,7 +133,6 @@
     </div>
   </div>
 
-  <!-- Timeout Modal -->
   <div id="timeoutBackdrop" class="modal-backdrop" style="display:none;">
     <div class="modal">
       <h3 id="timeoutTitle">Stage Timed Out</h3>
@@ -149,15 +147,14 @@
     </div>
   </div>
 
-  <!-- Libraries -->
+  <!-- Turf for GeoJSON -->
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
 
-  <!-- Keep this line so OpenCV preprocessing is used when available -->
+  <!-- Keep this to enable OpenCV-based preprocessing when available -->
   <script async src="https://docs.opencv.org/4.x/opencv.js"
           onload="window.__cvLoaded=true"
           onerror="window.__cvLoaded=false"></script>
 
-  <!-- App -->
   <script src="app.js"></script>
 </body>
 </html>
