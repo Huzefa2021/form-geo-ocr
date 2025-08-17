@@ -53,6 +53,30 @@
     <div class="saffron-line"></div>
   </header>
 
+  <!-- Sticky stage strip (glued under header) -->
+<div class="stage-wrap">
+  <div class="stage-bar">
+    <div id="st-upload" class="stage-pill is-pending">
+      <span class="icon">⬆️</span> Upload
+    </div>
+    <div id="st-ocr" class="stage-pill is-pending">
+      <span class="icon">🔎</span> OCR
+    </div>
+    <div id="st-parse" class="stage-pill is-pending">
+      <span class="icon">🧩</span> Parse
+    </div>
+    <div id="st-geo" class="stage-pill is-pending">
+      <span class="icon">🗺️</span> GeoJSON
+    </div>
+    <div id="st-review" class="stage-pill is-pending">
+      <span class="icon">✅</span> Review
+    </div>
+  </div>
+  <div id="stage-times" class="stage-times">
+    Upload — 0.0s • OCR — 0.0s • Parse — 0.0s • GeoJSON — 0.0s • Review — 0.0s
+  </div>
+</div>
+
   <!-- Status strip -->
   <section class="status-strip">
     <div id="stageTimes">Upload — 0.0s • OCR — 0.0s • Parse — 0.0s • GeoJSON — 0.0s • Review — 0.0s • Redirect — 0.0s</div>
