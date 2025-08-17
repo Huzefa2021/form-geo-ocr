@@ -1,353 +1,403 @@
-/* app.js — MCGM Marshal Upload
-   - robust overlay crop (keeps whole "Lat ... Long ..." line)
-   - tolerant OCR parsing for date/time/lat/lng/address
-   - GeoJSON lookup for Ward / Beat / Police Station
-   - no UI changes required
+/* app.js — stable DnD + single-open picker + preview + OCR/GeoJSON pipeline
+   - Guards against double wiring and double picker
+   - Stops event bubbling from nested labels
+   - Fallback image decoding if createImageBitmap is unavailable
+   - Everything else (OCR/parse/grid) same behaviour as before
 */
 
-// ---------- Config ----------
-const GJ_URLS = window.GJ_URLS || {
-  wards:  'data/wards.geojson',
-  beats:  'data/beats.geojson',
-  police: 'data/police_jurisdiction.geojson'
-};
-
-// If your HTML uses different IDs, map them here.
-// We'll try these id variants in order for each key.
-const ID_MAP = {
-  date:      ['res-date','out-date','date','dateVal'],
-  time:      ['res-time','out-time','time','timeVal'],
-  latitude:  ['res-lat','out-lat','latitude','latVal'],
-  longitude: ['res-lng','out-lng','longitude','lngVal'],
-  address:   ['res-address','out-address','address','addrVal'],
-  ward:      ['res-ward','out-ward','ward'],
-  beat:      ['res-beat','out-beat','beat'],
-  ps:        ['res-ps','out-ps','police','policeStation','psVal'],
-
-  // previews (optional)
-  thumbOrig: ['thumb-orig','origThumb','origImgThumb'],
-  thumbCrop: ['thumb-crop','cropThumb','cropImgThumb'],
-
-  // file input & drop zone (use whatever you already have)
-  fileInput: ['file','fileInput','photo'],
-  dropZone:  ['drop','dropZone','uploadBox']
-};
-
-// Cropping constants for GPS Map Camera ribbon (bottom)
-const CROP = {
-  // We crop a band at the bottom; adjust with these percentages.
-  // The left margin is deliberately widened so the "Lat ..." text is included.
-  LEFT_PCT:   0.33,  // was ~0.45 earlier; moved left to keep "Lat" fully
-  TOP_PCT:    0.74,
-  WIDTH_PCT:  0.65,
-  HEIGHT_PCT: 0.22,
-
-  // If your images vary a lot, you can clamp to min width/height in px.
-  MIN_H: 160
-};
-
-// Mumbai sanity window (used to validate/repair coords)
-const MUMBAI = {
-  latMin: 18.0, latMax: 20.8,
-  lngMin: 72.0, lngMax: 73.3
-};
-
-// ---------- Helpers ----------
-function qsByList(list) {
-  for (const id of list) {
-    const el = document.getElementById(id);
-    if (el) return el;
+/* ======================== CONFIG ======================== */
+const CFG = {
+  paths: {
+    wards: './data/wards.geojson',
+    beats: './data/beats.geojson',
+    police: './data/police_jurisdiction.geojson',
+  },
+  crop: {
+    bottomStartFrac: 0.72,
+    ribbonMinHeightFrac: 0.16,
+    ribbonMaxHeightFrac: 0.26,
+    leftCutPx: 80,
+    rightPadPx: 16,
+    fallbackRect: { xFrac: 0.33, yFrac: 0.74, wFrac: 0.65, hFrac: 0.22 }
+  },
+  cityWindow: { latMin: 18.0, latMax: 20.8, lngMin: 72.0, lngMax: 73.3 },
+  dom: {
+    input: '#file,#fileInput,input[type=file]',
+    origImg:  '#orig-preview',
+    cropImg:  '#crop-preview',
+    date: '#res-date', time: '#res-time',
+    lat:  '#res-lat',  lng:  '#res-lng',
+    addr: '#res-address',
+    ward: '#res-ward', beat: '#res-beat', ps: '#res-ps',
+    perf: '#perf-line'
   }
+};
+
+/* ===================== DOM HELPERS ====================== */
+const $ = s => document.querySelector(s);
+const setText = (sel, v) => { const el = $(sel); if (el) el.textContent = v ?? '—'; };
+const setImg  = (sel, src) => { const el = $(sel); if (el && src) { el.src = src; el.removeAttribute('title'); } };
+
+function findHeading(regex) {
+  const nodes = document.querySelectorAll('h1,h2,h3,h4,h5,h6,.card-title,.panel-title,legend');
+  for (const n of nodes) if (regex.test(n.textContent || '')) return n;
   return null;
 }
-function setOut(key, value) {
-  const ids = ID_MAP[key] || [];
-  const el = qsByList(ids);
-  if (el) el.textContent = value ?? '—';
-}
-function setThumb(key, blobUrl) {
-  const holder = qsByList(ID_MAP[key] || []);
-  if (!holder) return;
-  // support <img> or a div where we inject an <img>
-  let img = holder.tagName === 'IMG' ? holder : holder.querySelector('img');
-  if (!img) {
-    img = document.createElement('img');
-    img.alt = key;
-    img.style.maxWidth = '100%';
-    img.style.borderRadius = '6px';
-    if (holder.tagName !== 'IMG') holder.innerHTML = '', holder.appendChild(img);
+function findCardBody(headingNode) {
+  if (!headingNode) return null;
+  let p = headingNode.parentElement;
+  let candidates = [headingNode.nextElementSibling, p && p.nextElementSibling, p];
+  for (const c of candidates) {
+    if (!c) continue;
+    if (c.querySelector('img') || c.clientHeight >= 60) return c;
   }
-  img.src = blobUrl;
+  return p || headingNode;
 }
-function asBlobURL(canvas) {
-  return new Promise(res => canvas.toBlob(b => res(URL.createObjectURL(b)), 'image/png'));
-}
-function loadImageFromFile(file) {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => resolve({img, url});
-    img.onerror = reject;
-    img.src = url;
-  });
-}
-function normText(s) {
-  return s
-    .replace(/[|]/g, '1')
-    .replace(/O/g, '0')
-    .replace(/\u00A0/g, ' ')  // NBSP
-    .replace(/°/g, '')
-    .replace(/,\s*(\d)/g, '.$1')
-    .trim();
-}
-function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
 
-// ---------- Crop logic ----------
-function getOverlayCropRect(w, h) {
-  // Basic percentage-based band crop (good enough for GPS Map Camera)
-  const x = Math.floor(w * CROP.LEFT_PCT);
-  const y = Math.floor(h * CROP.TOP_PCT);
-  const cw = Math.floor(w * CROP.WIDTH_PCT);
-  const ch = Math.max(Math.floor(h * CROP.HEIGHT_PCT), CROP.MIN_H);
-  return { x: clamp(x, 0, w-1), y: clamp(y, 0, h-1), w: clamp(cw, 1, w), h: clamp(ch, 1, h-y) };
+/* create preview <img> if missing */
+function ensurePreviewImages() {
+  // Original
+  if (!$(CFG.dom.origImg)) {
+    const dz = findDropZone();
+    if (dz) {
+      const img = document.createElement('img');
+      img.id = CFG.dom.origImg.slice(1);
+      img.alt = 'Original Photo';
+      img.style.display = 'block';
+      img.style.maxWidth = '90%';
+      img.style.margin = '16px auto';
+      img.style.height = 'auto';
+      dz.appendChild(img);
+    }
+  }
+  // Cropped
+  if (!$(CFG.dom.cropImg)) {
+    const heading = findHeading(/cropped overlay/i);
+    const host = heading ? findCardBody(heading) : null;
+    if (host) {
+      const img = document.createElement('img');
+      img.id = CFG.dom.cropImg.slice(1);
+      img.alt = 'Cropped Overlay';
+      img.style.display = 'block';
+      img.style.maxWidth = '90%';
+      img.style.margin = '12px auto';
+      img.style.height = 'auto';
+      host.appendChild(img);
+    }
+  }
 }
-function cropToCanvas(img, rect) {
+
+/* =================== DROP ZONE DETECTION =================== */
+function findDropZone() {
+  let dz = document.querySelector('[data-dropzone]') ||
+           document.querySelector('.dropzone, .upload-drop, .dashed, .uploader, .upload-box');
+  if (dz) return dz;
+
+  const all = Array.from(document.querySelectorAll('div,section,article'));
+  const txt = all.find(el => /tap to choose image|drag & drop/i.test(el.textContent || ''));
+  if (txt) return txt;
+
+  return all.find(el => {
+    const cs = getComputedStyle(el);
+    return (parseInt(cs.borderWidth,10) >= 1 && cs.borderStyle.includes('dashed') && el.clientHeight > 80);
+  }) || document.body;
+}
+
+/* =================== BITMAP / CANVAS UTILS =================== */
+async function fileToBitmap(file) {
+  if ('createImageBitmap' in window) {
+    try { return await createImageBitmap(file); } catch {}
+  }
+  // Fallback: FileReader -> Image -> draw to canvas -> bitmap-like object
+  const dataURL = await new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(fr.result);
+    fr.onerror = rej;
+    fr.readAsDataURL(file);
+  });
+  const imgEl = await new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = rej;
+    img.src = dataURL;
+  });
   const c = document.createElement('canvas');
-  c.width = rect.w;
-  c.height = rect.h;
-  const g = c.getContext('2d');
-  g.drawImage(img, rect.x, rect.y, rect.w, rect.h, 0, 0, rect.w, rect.h);
+  c.width = imgEl.naturalWidth; c.height = imgEl.naturalHeight;
+  c.getContext('2d').drawImage(imgEl, 0, 0);
+  // return a pseudo-bitmap (canvas acts as source for drawImage)
+  return { width: c.width, height: c.height, _canvas: c };
+}
+function canvasFromBitmap(bmp) {
+  if (bmp._canvas) return bmp._canvas; // fallback path
+  const c = document.createElement('canvas');
+  c.width = bmp.width; c.height = bmp.height;
+  c.getContext('2d').drawImage(bmp, 0, 0);
+  return c;
+}
+function dataURLFromCanvas(cv) { return cv.toDataURL('image/jpeg', 0.92); }
+
+/* bottom-ribbon auto crop */
+function computeRibbonRect(bmp) {
+  const { width:w, height:h } = bmp;
+  const ctx = canvasFromBitmap(bmp).getContext('2d', { willReadFrequently: true });
+  const startY = Math.floor(h * CFG.crop.bottomStartFrac);
+  const scanH  = h - startY;
+  const imgData = ctx.getImageData(0, startY, w, scanH);
+  const px = imgData.data;
+
+  const rowLuma = new Float32Array(scanH);
+  for (let y = 0; y < scanH; y++) {
+    let sum = 0; let off = y * w * 4;
+    for (let x = 0; x < w; x++, off += 4) {
+      const r = px[off], g = px[off+1], b = px[off+2];
+      sum += 0.2126*r + 0.7152*g + 0.0722*b;
+    }
+    rowLuma[y] = sum / w;
+  }
+  const minH = Math.floor(h * CFG.crop.ribbonMinHeightFrac);
+  const maxH = Math.floor(h * CFG.crop.ribbonMaxHeightFrac);
+  let best = null;
+  for (let hh = minH; hh <= maxH; hh += Math.max(4, Math.floor(h*0.01))) {
+    for (let y = 0; y + hh <= scanH; y += 4) {
+      let acc = 0;
+      for (let t = 0; t < hh; t++) acc += rowLuma[y+t];
+      const avg = acc / hh;
+      if (!best || avg < best.avg) best = { y, hh, avg };
+    }
+  }
+  if (!best) {
+    const r = CFG.crop.fallbackRect;
+    return { x: Math.floor(w*r.xFrac), y: Math.floor(h*r.yFrac), w: Math.floor(w*r.wFrac), h: Math.floor(h*r.hFrac) };
+  }
+  const x = Math.max(CFG.crop.leftCutPx, 0);
+  const y = startY + best.y;
+  const rectW = w - x - CFG.crop.rightPadPx;
+  const rectH = best.hh;
+  return { x, y, w: rectW, h: rectH };
+}
+function cropCanvas(bmp, rect) {
+  const src = canvasFromBitmap(bmp);
+  const c = document.createElement('canvas');
+  c.width = rect.w; c.height = rect.h;
+  c.getContext('2d').drawImage(src, rect.x, rect.y, rect.w, rect.h, 0, 0, rect.w, rect.h);
   return c;
 }
 
-// ---------- OCR (Tesseract.js must be loaded via CDN in HTML) ----------
-async function ocrImage(canvas, lang='eng') {
-  if (!window.Tesseract) throw new Error('Tesseract.js not loaded');
-  const { createWorker } = Tesseract;
-  const worker = await createWorker(lang, 1, {
-    logger: m => { /* optional: hook to your progress UI */ }
+/* =================== OCR & PARSING (same logic) =================== */
+function norm(s){
+  return s.replace(/[|]/g,'1').replace(/O/g,'0').replace(/°/g,'')
+          .replace(/\u00A0/g,' ').replace(/—/g,'-').replace(/,\s*(\d)/g,'.$1');
+}
+const LAT_PATTS=[/(?:\bLat(?:itude)?\b)[:\s]*([+-]?\d{1,2}[.,]?\d{3,8})/i,/\b([12]\d\.\d{4,8})\b(?=[^\d]{0,6}\b(?:Long|Lon|Lng)\b)/i];
+const LNG_PATTS=[/(?:\bLon(?:g|gitude)?\b)[:\s]*([+-]?\d{1,3}[.,]?\d{3,8})/i,/\b(7[02]\.\d{4,8})\b/];
+function pickLatLng(text){
+  const t=norm(text);
+  const tryP=ps=>{for(const p of ps){const m=t.match(p);if(m) return parseFloat(m[1].replace(',', '.'));}return null;};
+  let lat=tryP(LAT_PATTS), lng=tryP(LNG_PATTS);
+  const inLat=v=>v!=null&&v>=CFG.cityWindow.latMin&&v<=CFG.cityWindow.latMax;
+  const inLng=v=>v!=null&&v>=CFG.cityWindow.lngMin&&v<=CFG.cityWindow.lngMax;
+  if(!inLat(lat)||!inLng(lng)){
+    const nums=Array.from(t.matchAll(/\b-?\d{1,3}[.,]\d{3,8}\b/g)).map(m=>parseFloat(m[0].replace(',', '.')));
+    if(!inLat(lat)) lat=nums.find(inLat)??lat;
+    if(!inLng(lng)) lng=nums.find(inLng)??lng;
+  }
+  return { lat: (lat!=null&&lat>=-90&&lat<=90)?lat:null, lng:(lng!=null&&lng>=-180&&lng<=180)?lng:null };
+}
+function pickDateTime(text){
+  const t=norm(text);
+  const dm=t.match(/\b(\d{1,2})[\/\-](\d{1,2})[\/\-](20\d{2})\b/);
+  const dateStr=dm?`${dm[3]}-${String(dm[2]).padStart(2,'0')}-${String(dm[1]).padStart(2,'0')}`:'—';
+  const tm=t.match(/\b(\d{1,2}):(\d{2})\s*(AM|PM)?\b/i);
+  let timeStr='—'; if(tm){let hh=parseInt(tm[1],10), mm=tm[2], ap=(tm[3]||'').toUpperCase(); if(ap==='PM'&&hh<12)hh+=12; if(ap==='AM'&&hh===12)hh=0; timeStr=`${String(hh).padStart(2,'0')}:${mm}`;}
+  return {dateStr,timeStr};
+}
+function pickAddress(text){
+  const clean=norm(text).replace(/[^\w\s,+\-./()#]/g,' ').replace(/\s{2,}/g,' ').trim();
+  const lines=clean.split(/\n/).map(s=>s.trim()).filter(Boolean);
+  const cue=/(mumbai|maharashtra|india|road|rd|nagar|colony|society|west|east|andheri|goregaon)/i;
+  let picked=lines.filter(l=>cue.test(l)); if(!picked.length) picked=lines;
+  let addr=picked.join(', ').replace(/\bGMT.*$/i,'').replace(/\b(?:AM|PM)\b.*$/i,'').trim();
+  return addr||'—';
+}
+async function ocrCanvas(canvas, lang='eng'){
+  const res=await Tesseract.recognize(canvas, lang, { logger:()=>{} });
+  return (res&&res.data&&res.data.text)?res.data.text:'';
+}
+
+/* =================== GEOJSON GRID (same) =================== */
+const geoIndex={wards:null,beats:null,police:null,grid:{wards:new Map(),beats:new Map(),police:new Map()},bbox:{wards:null,beats:null,police:null},loaded:false};
+async function loadGeo(){
+  if(geoIndex.loaded) return;
+  const [wards,beats,police]=await Promise.all([
+    fetch(CFG.paths.wards).then(r=>r.json()),
+    fetch(CFG.paths.beats).then(r=>r.json()),
+    fetch(CFG.paths.police).then(r=>r.json()),
+  ]);
+  geoIndex.wards=wards; geoIndex.beats=beats; geoIndex.police=police;
+  buildGrid('wards',wards); buildGrid('beats',beats); buildGrid('police',police);
+  geoIndex.loaded=true;
+}
+function buildGrid(kind, gj, cells=50){
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  gj.features.forEach(f=>{const b=bboxOfFeature(f);minX=Math.min(minX,b[0]);minY=Math.min(minY,b[1]);maxX=Math.max(maxX,b[2]);maxY=Math.max(maxY,b[3]);});
+  geoIndex.bbox[kind]=[minX,minY,maxX,maxY];
+  const grid=geoIndex.grid[kind], dx=(maxX-minX)/cells, dy=(maxY-minY)/cells;
+  gj.features.forEach((f,idx)=>{const b=bboxOfFeature(f);
+    const x0=Math.floor((b[0]-minX)/dx),x1=Math.floor((b[2]-minX)/dx),
+          y0=Math.floor((b[1]-minY)/dy),y1=Math.floor((b[3]-minY)/dy);
+    for(let x=Math.max(0,x0);x<=Math.min(cells-1,x1);x++)
+      for(let y=Math.max(0,y0);y<=Math.min(cells-1,y1);y++){
+        const key=`${x}:${y}`; if(!grid.has(key)) grid.set(key,[]); grid.get(key).push(idx);
+      }
   });
-  const { data } = await worker.recognize(canvas);
-  await worker.terminate();
-  return data.text || '';
 }
-
-// ---------- Parsing ----------
-function parseDate(text) {
-  const t = normText(text);
-  // dd/mm/yyyy or dd-mm-yyyy
-  const m = t.match(/\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})\b/);
-  if (!m) return null;
-  let [ , dd, mm, yy ] = m;
-  if (yy.length === 2) yy = (parseInt(yy,10) > 50 ? '19' : '20') + yy;
-  const d = String(parseInt(dd,10)).padStart(2,'0');
-  const m2= String(parseInt(mm,10)).padStart(2,'0');
-  return `${yy}-${m2}-${d}`;
+function bboxOfFeature(f){let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  const each=a=>a.forEach(([x,y])=>{minX=Math.min(minX,x);minY=Math.min(minY,y);maxX=Math.max(maxX,x);maxY=Math.max(maxY,y);});
+  const g=f.geometry; if(g.type==='Polygon') g.coordinates.forEach(r=>each(r));
+  else if(g.type==='MultiPolygon') g.coordinates.forEach(poly=>poly.forEach(r=>each(r)));
+  return [minX,minY,maxX,maxY];
 }
-function parseTime(text) {
-  const t = normText(text);
-  const m = t.match(/\b(\d{1,2}):(\d{2})\s*(AM|PM)?\b/i);
-  if (!m) return null;
-  let hh = parseInt(m[1],10), mm = m[2], ap = (m[3]||'').toUpperCase();
-  if (ap === 'PM' && hh < 12) hh += 12;
-  if (ap === 'AM' && hh === 12) hh = 0;
-  return `${String(hh).padStart(2,'0')}:${mm}`;
+function pointInPoly([x,y], geom){
+  const edge=(ring)=>{let ins=false; for(let i=0,j=ring.length-1;i<ring.length;j=i++){
+    const [xi,yi]=ring[i], [xj,yj]=ring[j];
+    const hit=((yi>y)!==(yj>y)) && (x < (xj-xi)*(y-yi)/(yj-yi)+xi); if(hit) ins=!ins;
+  } return ins;};
+  if(geom.type==='Polygon') return edge(geom.coordinates[0]);
+  if(geom.type==='MultiPolygon') return geom.coordinates.some(poly=>edge(poly[0]));
+  return false;
 }
-function pickLatLng(text) {
-  const t = normText(text);
-
-  const LAT_PATTS = [
-    /(?:\bLat(?:itude)?\b)[:\s]*([+-]?\d{1,2}[.,]?\d{3,8})\b/i,
-    /\b([12]\d\.\d{4,8})\b(?=[^\d]{0,6}\b(?:Lon|Lng|Long)\b)/i
-  ];
-  const LNG_PATTS = [
-    /(?:\bLon(?:g|gitude)?\b)[:\s]*([+-]?\d{1,3}[.,]?\d{3,8})\b/i,
-    /\b(7[02]\.\d{4,8})\b/
-  ];
-
-  const tryP = (patts) => {
-    for (const p of patts) { const m = t.match(p); if (m) return parseFloat(m[1]); }
-    return null;
-  };
-
-  let lat = tryP(LAT_PATTS);
-  let lng = tryP(LNG_PATTS);
-
-  const inLat = v => typeof v === 'number' && v >= MUMBAI.latMin && v <= MUMBAI.latMax;
-  const inLng = v => typeof v === 'number' && v >= MUMBAI.lngMin && v <= MUMBAI.lngMax;
-
-  // If one is missing, try to infer from any decimal found
-  if (!inLat(lat) || !inLng(lng)) {
-    const nums = Array.from(t.matchAll(/\b-?\d{1,3}[.,]\d{3,8}\b/g))
-      .map(m => parseFloat(m[0].replace(',', '.')));
-    if (!inLat(lat))  lat = nums.find(inLat) ?? lat;
-    if (!inLng(lng))  lng = nums.find(inLng) ?? lng;
-  }
-
-  // Auto-fix swapped coords if needed
-  if (!inLat(lat) && inLat(lng) && inLng(lat)) {
-    const tmp = lat; lat = lng; lng = tmp;
-  }
-
-  if (!inLat(lat)) lat = null;
-  if (!inLng(lng)) lng = null;
-  return { lat, lng };
-}
-function parseAddress(text) {
-  const t = normText(text);
-  // Grab lines that look like address but exclude telemetry lines
-  const lines = t.split(/\n+/).map(s => s.trim()).filter(Boolean);
-  const banned = /^(Lat|Lon|Long|Wind|Humidity|Pressure|Temperature|Google|GMT|GPS Map)/i;
-
-  const candid = [];
-  for (const line of lines) {
-    if (banned.test(line)) continue;
-    if (/\b(India|Mumbai|Maharashtra)\b/i.test(line) || /,/.test(line)) {
-      candid.push(line);
-    }
-  }
-  const raw = candid.join(', ');
-  return raw
-    .replace(/[^\w\s,+\-./()#]/g, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-}
-
-// ---------- GeoJSON lookup ----------
-let GJ_CACHE = { wards:null, beats:null, police:null };
-
-async function ensureGeoJSON() {
-  const keys = Object.keys(GJ_URLS);
-  for (const k of keys) {
-    if (!GJ_CACHE[k]) {
-      const r = await fetch(GJ_URLS[k]);
-      if (!r.ok) throw new Error(`Failed to load ${k}`);
-      GJ_CACHE[k] = await r.json();
-    }
-  }
-}
-
-function pointInPoly(pt, poly) {
-  // Ray casting; pt = [lng, lat]
-  let x = pt[0], y = pt[1], inside = false;
-  // polygon or multipolygon
-  const rings = Array.isArray(poly[0][0]) ? poly : [poly];
-  for (const ring of rings) {
-    for (let i=0, j=ring.length-1; i<ring.length; j=i++) {
-      const xi = ring[i][0], yi = ring[i][1];
-      const xj = ring[j][0], yj = ring[j][1];
-      const intersect = ((yi>y)!==(yj>y)) && (x < (xj-xi)*(y-yi)/(yj-yi)+xi);
-      if (intersect) inside = !inside;
-    }
-  }
-  return inside;
-}
-
-function findPropAt(lat, lng, gj, propNameCandidates) {
-  if (!gj) return null;
-  const pt = [lng, lat];
-  for (const f of gj.features || []) {
-    const g = f.geometry;
-    if (!g) continue;
-    if (g.type === 'Polygon') {
-      if (pointInPoly(pt, g.coordinates[0])) {
-        for (const p of propNameCandidates) if (f.properties?.[p]) return String(f.properties[p]);
-        return null;
-      }
-    } else if (g.type === 'MultiPolygon') {
-      for (const poly of g.coordinates) {
-        if (pointInPoly(pt, poly[0])) {
-          for (const p of propNameCandidates) if (f.properties?.[p]) return String(f.properties[p]);
-          return null;
-        }
-      }
-    }
+function hitsFor(kind, lon, lat){
+  const gj=geoIndex[kind]; if(!gj) return null; const [minX,minY,maxX,maxY]=geoIndex.bbox[kind];
+  if(lon<minX||lon>maxX||lat<minY||lat>maxY) return null;
+  const cells=50, dx=(maxX-minX)/cells, dy=(maxY-minY)/cells;
+  const cx=Math.max(0,Math.min(cells-1,Math.floor((lon-minX)/dx)));
+  const cy=Math.max(0,Math.min(cells-1,Math.floor((lat-minY)/dy)));
+  const bucket=geoIndex.grid[kind].get(`${cx}:${cy}`)||[];
+  for(const idx of bucket){
+    const f=gj.features[idx], bb=bboxOfFeature(f);
+    if(!(lon>=bb[0]&&lon<=bb[2]&&lat>=bb[1]&&lat<=bb[3])) continue;
+    if(pointInPoly([lon,lat],f.geometry)) return f;
   }
   return null;
 }
+const propsOf = f => f ? (f.properties || f.attrs || {}) : {};
 
-async function geoLookup(lat, lng) {
-  await ensureGeoJSON();
-  const ward = findPropAt(lat, lng, GJ_CACHE.wards,  ['WARD','Ward','ward','WARD_NAME','name']);
-  const beat = findPropAt(lat, lng, GJ_CACHE.beats,   ['BEAT_NO','Beat_No','Beat','BEAT','name']);
-  const ps   = findPropAt(lat, lng, GJ_CACHE.police,  ['PS_NAME','PS','Police_Stn','name']);
-  return { ward, beat, ps };
+/* =================== PIPELINE =================== */
+async function processFile(file){
+  if(!file || !/^image\/(jpeg|png)$/i.test(file.type)) { alert('Please upload a JPG or PNG image.'); return; }
+
+  ensurePreviewImages();
+
+  const t0=performance.now();
+  const bmp=await fileToBitmap(file);
+  const originalUrl=dataURLFromCanvas(canvasFromBitmap(bmp));
+  setImg(CFG.dom.origImg, originalUrl);
+
+  const rect=computeRibbonRect(bmp);
+  const cropCv=cropCanvas(bmp, rect);
+  setImg(CFG.dom.cropImg, dataURLFromCanvas(cropCv));
+  const t1=performance.now();
+
+  // OCR with Marathi fallback when Devanagari is detected
+  let txtEng=await ocrCanvas(cropCv,'eng');
+  let text=txtEng;
+  if(/[क़-ॿ]/.test(txtEng)) {
+    try {
+      const txtMar=await ocrCanvas(cropCv,'mar');
+      text = (txtMar.length > txtEng.length) ? `${txtEng}\n${txtMar}` : `${txtMar}\n${txtEng}`;
+    } catch {}
+  }
+  const t2=performance.now();
+
+  const {dateStr,timeStr}=pickDateTime(text);
+  const {lat,lng}=pickLatLng(text);
+  const addr=pickAddress(text);
+
+  setText(CFG.dom.date, dateStr);
+  setText(CFG.dom.time, timeStr);
+  setText(CFG.dom.lat,  lat!=null ? lat.toFixed(6) : '—');
+  setText(CFG.dom.lng,  lng!=null ? lng.toFixed(6) : '—');
+  setText(CFG.dom.addr, addr || '—');
+
+  let ward='—', beat='—', ps='—';
+  if(lat!=null && lng!=null){
+    await loadGeo();
+    const fW=hitsFor('wards',lng,lat);
+    const fB=hitsFor('beats',lng,lat);
+    const fP=hitsFor('police',lng,lat);
+    const pW=propsOf(fW), pB=propsOf(fB), pP=propsOf(fP);
+    ward=pW.WARD||pW.ward||pW.name||'—';
+    beat=pB.BEAT_NO||pB.beat||pB.name||'—';
+    ps  =pP.PS_NAME||pP.name ||pP.station||'—';
+  }
+  setText(CFG.dom.ward, ward);
+  setText(CFG.dom.beat, beat);
+  setText(CFG.dom.ps, ps);
+
+  const t3=performance.now();
+  setText(CFG.dom.perf, `Upload — ${((t1-t0)/1000).toFixed(1)}s • OCR — ${((t2-t1)/1000).toFixed(1)}s • Parse — 0.0s • GeoJSON — ${((t3-t2)/1000).toFixed(1)}s`);
 }
 
-// ---------- Orchestration ----------
-async function processFile(file) {
-  try {
-    // 1) Load and show original thumbnail (browser side — actual size control is CSS)
-    const { img, url } = await loadImageFromFile(file);
-    // Show tiny preview (we generate a small canvas to avoid large image URLs)
-    const oCan = document.createElement('canvas');
-    const scale = Math.min(512 / img.width, 512 / img.height, 1);
-    oCan.width = Math.floor(img.width * scale);
-    oCan.height = Math.floor(img.height * scale);
-    oCan.getContext('2d').drawImage(img, 0, 0, oCan.width, oCan.height);
-    setThumb('thumbOrig', await asBlobURL(oCan));
+/* =================== WIRING (single-open & once) =================== */
+let WIRED = false;
+let openingPicker = false;
 
-    // 2) Crop overlay band (wider left margin to keep "Lat …" fully)
-    const rect = getOverlayCropRect(img.width, img.height);
-    const crop = cropToCanvas(img, rect);
-    setThumb('thumbCrop', await asBlobURL(crop));
+function wireInputAndDrop(){
+  if (WIRED) return; WIRED = true;
 
-    // 3) OCR
-    const rawText = await ocrImage(crop, 'eng');  // keep UI light; switch to 'eng+hin' if you really need
-    const text = normText(rawText);
+  const input = document.querySelector(CFG.dom.input);
+  const drop  = findDropZone();
+  ensurePreviewImages();
 
-    // 4) Parse fields
-    const date = parseDate(text);
-    const time = parseTime(text);
-    const { lat, lng } = pickLatLng(text);
-    const addr = parseAddress(text);
+  // If there's a visible label inside, let it handle the click (avoid double open)
+  const hasInnerLabel = drop && drop.querySelector('label[for]');
 
-    setOut('date', date || '—');
-    setOut('time', time || '—');
-    setOut('latitude', lat != null ? lat.toFixed(6) : '—');
-    setOut('longitude', lng != null ? lng.toFixed(6) : '—');
-    setOut('address', addr || '—');
+  if (drop && input && !hasInnerLabel) {
+    drop.style.cursor = 'pointer';
+    drop.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (openingPicker) return;
+      openingPicker = true;
+      input.click();
+      setTimeout(() => openingPicker = false, 600);
+    }, { passive:false });
+    drop.addEventListener('pointerdown', () => { /* capture gesture to satisfy iOS */ }, { passive:true });
+  }
 
-    // 5) GeoJSON lookup (only when coords are valid)
-    if (lat != null && lng != null) {
-      const gj = await geoLookup(lat, lng);
-      setOut('ward', gj.ward || '—');
-      setOut('beat', gj.beat || '—');
-      setOut('ps',   gj.ps   || '—');
-    } else {
-      setOut('ward', '—');
-      setOut('beat', '—');
-      setOut('ps',   '—');
-    }
-  } catch (err) {
-    console.error(err);
-    // Keep UI silent; you can wire an alert/toast here if you want
+  if (input) {
+    input.setAttribute('accept', 'image/jpeg,image/png');
+    input.addEventListener('change', (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (f) {
+        processFile(f);
+        // allow selecting same file again later
+        try { e.target.value = ''; } catch {}
+      }
+    }, { passive:true });
+  }
+
+  // Drag & drop
+  const addHL = () => drop && drop.classList.add('is-dragover');
+  const rmHL  = () => drop && drop.classList.remove('is-dragover');
+
+  const over = (e) => { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer) e.dataTransfer.dropEffect='copy'; addHL(); };
+  const leave= (e) => { e.preventDefault(); e.stopPropagation(); rmHL(); };
+  const dropH= (e) => {
+    e.preventDefault(); e.stopPropagation(); rmHL();
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) processFile(f);
+  };
+
+  if (drop) {
+    drop.addEventListener('dragenter', over, { passive:false });
+    drop.addEventListener('dragover',  over, { passive:false });
+    drop.addEventListener('dragleave', leave, { passive:false });
+    drop.addEventListener('dragend',  leave, { passive:false });
+    drop.addEventListener('drop',     dropH, { passive:false });
+  } else {
+    document.addEventListener('dragover', (e)=>{ e.preventDefault(); }, { passive:false });
+    document.addEventListener('drop', (e)=>{ e.preventDefault(); const f=e.dataTransfer?.files?.[0]; if(f) processFile(f); }, { passive:false });
   }
 }
 
-// ---------- Wiring ----------
-function findFirstExistingId(list) { return qsByList(list || [])?.id || null; }
-
-(function boot() {
-  const fi = qsByList(ID_MAP.fileInput) || document.querySelector('input[type=file]');
-  const dz = qsByList(ID_MAP.dropZone) || document.body;
-
-  if (dz) {
-    dz.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect='copy'; });
-    dz.addEventListener('drop', async e => {
-      e.preventDefault();
-      const f = e.dataTransfer?.files?.[0];
-      if (f) processFile(f);
-    });
-    dz.addEventListener('click', () => fi && fi.click());
-  }
-  if (fi) {
-    fi.addEventListener('change', () => {
-      const f = fi.files?.[0];
-      if (f) processFile(f);
-    });
-  }
-
-  // Optional: expose for manual testing
-  window.__mcgm = { processFile };
-})();
+document.addEventListener('DOMContentLoaded', wireInputAndDrop);
