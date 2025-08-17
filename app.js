@@ -1,9 +1,11 @@
 /* =========================================================
    MCGM – Marshal Upload Portal : Application Script
-   Build: v2025.08.17.Prod.v9b
-   Changes: rail-info under progress, original 25%,
-   saffron lines via CSS (no code), OCR eng+hin+mar forcing
-   preserved, robust parsers preserved.
+   Build: v2025.08.17.Prod.v10
+   Changes:
+   • OCR is fully automatic: eng+hin (v5) → if Devanagari/weakness detected,
+     auto-upgrade to eng+hin+mar (v4.0.0) with graceful fallbacks.
+   • Load status + counts are shown under the progress bar.
+   • All previous geospatial & parsing hardening retained.
    ========================================================= */
 
 function $(id){ if(id && id[0]==='#') id=id.slice(1); return document.getElementById(id); }
@@ -14,10 +16,9 @@ const OCR_CDNS = [
   { label:"v5 (unpkg)",    url:"https://unpkg.com/tesseract.js@5/dist/tesseract.min.js" },
   { label:"v4 (fallback)", url:"https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js" },
 ];
-const TESS_LANG_PATHS = [
-  "https://tessdata.projectnaptha.com/5",
-  "https://tessdata.projectnaptha.com/4.0.0"
-];
+const LANG_PATH_V5  = "https://tessdata.projectnaptha.com/5";       // NOTE: no 'mar' here
+const LANG_PATH_V40 = "https://tessdata.projectnaptha.com/4.0.0";   // includes 'mar'
+
 function addScript(src){ return new Promise((res,rej)=>{ const s=document.createElement("script"); s.src=src; s.onload=res; s.onerror=rej; document.head.appendChild(s); }); }
 async function loadOCR(){
   const pill=$("#cdnPill");
@@ -25,6 +26,11 @@ async function loadOCR(){
     try{ await addScript(cdn.url); pill.textContent="CDN: "+cdn.label; pill.classList.add("ok"); return; }catch{}
   }
   pill.textContent="CDN: unavailable"; pill.classList.add("err");
+}
+async function ensureV4(){
+  if(!window.Tesseract?.recognize){
+    await addScript("https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js");
+  }
 }
 
 /* ---------- Config ---------- */
@@ -36,17 +42,12 @@ const ENTRY={
   address:"entry.1188611077", police:"entry.1555105834"
 };
 const STAGE_LIMITS=[20000,90000,12000,15000,45000,20000];
-const BUILD="v2025.08.17.Prod.v9b";
+const BUILD="v2025.08.17.Prod.v10";
 const MUMBAI_BBOX=[72.60,18.80,73.20,19.50];
-
-/* ---------- OCR Mode ---------- */
-const OCR_MODE_KEY="ocrLangMode"; // 'auto'|'eng'|'indic'
-function getOCRMode(){ return localStorage.getItem(OCR_MODE_KEY) || "auto"; }
-function setOCRMode(v){ localStorage.setItem(OCR_MODE_KEY, v); }
 
 /* ---------- Elements & State ---------- */
 const els={
-  ocrMode:$("#ocrMode"), dropCard:$("#dropCard"), drop:$("#drop"), file:$("#file"),
+  dropCard:$("#dropCard"), drop:$("#drop"), file:$("#file"),
   originalCard:$("#originalCard"), originalImg:$("#originalImg"),
   overlayCard:$("#overlayCard"), overlayImg:$("#overlayImg"), overlayScanner:$("#overlayScanner"),
   railStatus:$("#railStatus"), bar:$("#bar"), results:$("#results"),
@@ -156,16 +157,22 @@ function enhanceWithCV(canvas){
     const bin2 = new cv.Mat(); cv.threshold(blur, bin2, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
     const m1 = cv.mean(bin1)[0], m2 = cv.mean(bin2)[0];
     let best = m1>=m2 ? bin1 : bin2;
-    const hist = new cv.Mat(); cv.calcHist([best], [0], new cv.Mat(), hist, [256], [0,256]);
+
+    // auto invert if needed
+    const hist = new cv.Mat();
+    cv.calcHist([best], [0], new cv.Mat(), hist, [256], [0,256]);
     let cum=0, medianIdx=0, total=cv.countNonZero(best);
     for(let i=0;i<256;i++){ cum+=hist.data32F[i]; if(cum>=total/2){ medianIdx=i; break; } }
     if (medianIdx < 127) { const inv=new cv.Mat(); cv.bitwise_not(best, inv); best.delete(); best=inv; }
     hist.delete();
+
     const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(2,2));
     cv.morphologyEx(best, best, cv.MORPH_CLOSE, kernel);
     cv.GaussianBlur(best, best, new cv.Size(3,3), 0, 0, cv.BORDER_DEFAULT);
+
     cv.imshow(canvas, best);
     const url = canvas.toDataURL("image/png");
+
     src.delete(); gray.delete(); blur.delete(); bin1.delete(); bin2.delete(); best.delete(); kernel.delete();
     return url;
   }catch(e){ return null; }
@@ -202,6 +209,9 @@ async function cropOverlay(dataURL){
   return best;
 }
 
+/* ---------- Script detection ---------- */
+function hasDevanagari(str){ return /[\u0900-\u097F]/.test(String(str||"")); }
+
 /* ---------- Robust lat/lon + Address ---------- */
 function extractCoords(rawText){
   const raw = String(rawText || "");
@@ -237,7 +247,6 @@ function extractCoords(rawText){
 
   return { lat: isFinite(lat) ? String(lat) : "", lon: isFinite(lon) ? String(lon) : "" };
 }
-
 function extractAddress(raw){
   const text = String(raw||"").replace(/\u00A0|\u2009|\u2002|\u2003/g," ").replace(/[|·•]+/g," ").replace(/\s{2,}/g," ").trim();
   const lines = text.split(/\n+/).map(s => s.trim()).filter(Boolean);
@@ -284,34 +293,69 @@ function extractAddress(raw){
   return addr;
 }
 
-/* ---------- OCR ---------- */
-async function ensureV4(){
-  if(!window.Tesseract?.recognize){
-    await addScript("https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js");
-  }
-}
-/* Force eng+hin+mar for Auto/Indic (and explicit langPath) */
-async function ocrRecognize(url){
-  const mode=getOCRMode();
-  const lang = (mode === "eng") ? "eng" : "eng+hin+mar";
-  setStatus(`OCR (${lang})…`,"warn");
-
-  let lastErr=null;
-  for(const langPath of TESS_LANG_PATHS){
-    try{
-      const {data:{text}}=await Tesseract.recognize(url, lang, {
-        langPath, tessedit_pageseg_mode:6, preserve_interword_spaces:1
-      });
-      return text;
-    }catch(e){ lastErr=e; }
-  }
-  await ensureV4();
+/* ---------- OCR (auto with Marathi upgrade when useful) ---------- */
+async function ocrAuto(imageUrl){
+  // 1) Fast path: v5 with eng(+hin)
+  const langFast = "eng+hin";
+  setStatus(`OCR (${langFast} via v5)…`,"warn");
   try{
-    const {data:{text}}=await Tesseract.recognize(url, lang, {
-      langPath:"https://tessdata.projectnaptha.com/4.0.0", tessedit_pageseg_mode:6, preserve_interword_spaces:1
+    const res = await Tesseract.recognize(imageUrl, langFast, {
+      langPath: LANG_PATH_V5,
+      tessedit_pageseg_mode: 6,
+      preserve_interword_spaces: 1
     });
+    let text = res?.data?.text || "";
+
+    // Decide whether to upgrade: Devanagari present OR no coords found
+    const needUpgrade = hasDevanagari(text) || !extractCoords(text).lat || !extractCoords(text).lon;
+
+    if(needUpgrade){
+      // 2) Try Marathi pack from 4.0.0; if fails, retry eng+hin on 4.0.0
+      try{
+        setStatus(`OCR (eng+hin+mar via 4.0.0)…`,"warn");
+        const r2 = await Tesseract.recognize(imageUrl, "eng+hin+mar", {
+          langPath: LANG_PATH_V40,
+          tessedit_pageseg_mode: 6,
+          preserve_interword_spaces: 1
+        });
+        const t2 = r2?.data?.text || "";
+        // Prefer the longer / richer result
+        if(t2 && (t2.length > text.length*1.05 || hasDevanagari(t2))) text = t2;
+        return text;
+      }catch(e){
+        // If Marathi traineddata unavailable or network error, fallback
+        setStatus(`OCR (eng+hin via 4.0.0)…`,"warn");
+        const r3 = await Tesseract.recognize(imageUrl, "eng+hin", {
+          langPath: LANG_PATH_V40,
+          tessedit_pageseg_mode: 6,
+          preserve_interword_spaces: 1
+        });
+        const t3 = r3?.data?.text || "";
+        if(t3 && t3.length > text.length*1.05) text = t3;
+        return text;
+      }
+    }
+
+    // No upgrade needed
     return text;
-  }catch(e){ throw lastErr || e; }
+
+  }catch(e1){
+    // If v5 path failed entirely, ensure v4 runtime and do 4.0.0 attempts
+    await ensureV4();
+    try{
+      setStatus(`OCR (eng+hin+mar via v4)…`,"warn");
+      const r = await Tesseract.recognize(imageUrl, "eng+hin+mar", {
+        langPath: LANG_PATH_V40, tessedit_pageseg_mode: 6, preserve_interword_spaces: 1
+      });
+      return r?.data?.text || "";
+    }catch(e2){
+      setStatus(`OCR (eng+hin via v4)…`,"warn");
+      const r = await Tesseract.recognize(imageUrl, "eng+hin", {
+        langPath: LANG_PATH_V40, tessedit_pageseg_mode: 6, preserve_interword_spaces: 1
+      });
+      return r?.data?.text || "";
+    }
+  }
 }
 
 /* ---------- Redirect ---------- */
@@ -336,10 +380,6 @@ function bindDropzone(){
   dz.addEventListener("drop",(e)=>{ e.preventDefault(); dz.style.borderColor="#cfe0f3"; const f=e.dataTransfer?.files?.[0]; if(!f) return; if(!isAllowedImage(f)){ showModal("Unsupported file","Only image files (JPG, PNG, WEBP, HEIC/HEIF) are allowed."); return; } runPipeline(f); });
   fi.addEventListener("change",(e)=>{ const f=e.target.files?.[0]; if(!f) return; if(!isAllowedImage(f)){ showModal("Unsupported file","Only image files (JPG, PNG, WEBP, HEIC/HEIF) are allowed."); fi.value=""; return; } const tok=tokenOf(f); if(state.lastPickToken===tok) return; state.lastPickToken=tok; runPipeline(f); });
   $("#btnReset").onclick=()=>location.reload();
-
-  if (!localStorage.getItem(OCR_MODE_KEY)) setOCRMode("indic"); // default first time
-  els.ocrMode.value=getOCRMode();
-  els.ocrMode.addEventListener("change",()=>{ setOCRMode(els.ocrMode.value); setStatus(`OCR Mode: ${els.ocrMode.value.toUpperCase()}`,"ok"); });
 }
 
 /* ---------- Pipeline ---------- */
@@ -363,7 +403,7 @@ async function runPipeline(file){
 
     startStage(1); els.overlayImg.src=crop.displayUrl; els.overlayScanner.style.display="block";
     let text="";
-    try{ text=await ocrRecognize(crop.ocrUrl); }
+    try{ text=await ocrAuto(crop.ocrUrl); }
     catch{ els.overlayScanner.style.display="none"; setStatus("OCR failed. Please Retry.","err"); onStageTimeout(1); return; }
     els.overlayScanner.style.display="none"; endStage(1);
 
@@ -404,10 +444,21 @@ function parseAll(text){
 
 /* ---------- Boot ---------- */
 (async ()=>{
-  initResultSkeleton(); bindDropzone(); els.appVersion.textContent=BUILD;
+  initResultSkeleton();
+  bindDropzone();
+  els.appVersion.textContent=BUILD;
+
+  setStatus("Loading OCR library…","warn");
   await loadOCR();
-  try{ await loadGeo(); setStatus(`Maps loaded. W:${state.counts.wards} • B:${state.counts.beats} • PS:${state.counts.police}. Upload an image to begin.`,"ok"); }
-  catch{ setStatus("Could not load GeoJSON (check /data paths & filenames).","err"); }
+
+  setStatus("Loading maps (GeoJSON)…","warn");
+  try{
+    await loadGeo();
+    setStatus(`Ready — GeoJSON loaded · W:${state.counts.wards} • B:${state.counts.beats} • PS:${state.counts.police}`,"ok");
+  }catch{
+    setStatus("Could not load GeoJSON (check /data paths & filenames).","err");
+  }
+
   updateTimes();
-  applyChips(0); // show initial state
+  applyChips(0); // show initial "Upload" active
 })();
