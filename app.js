@@ -29,7 +29,7 @@ async function loadOCR() {
       window.__OCR_VERSION__ = cdn.label;
       if (pill) { pill.textContent = "CDN: " + cdn.label; pill.classList.add("ok"); }
       return;
-    } catch { /* try next */ }
+    } catch {/* try next */}
   }
   if (pill) { pill.textContent = "CDN: unavailable"; pill.classList.add("err"); }
 }
@@ -48,18 +48,13 @@ const ENTRY = {
   address: "entry.1188611077",
   police:  "entry.1555105834"
 };
-
-// Max allowed time per stage (ms): Upload, OCR, Parse, GeoJSON, Review, Redirect
+// Stage time limits (ms): Upload, OCR, Parse, GeoJSON, Review, Redirect
 const STAGE_LIMITS = [20000, 90000, 12000, 15000, 45000, 20000];
-
-// Debug toggle
 const DEBUG = true;
-
-// Broad Mumbai bbox (lon/lat) to avoid false “outside”
 const MUMBAI_BBOX = [72.60, 18.80, 73.20, 19.50];
 
 /* --------------------
-   DOM & Runtime State
+   Elements & State
    -------------------- */
 const els = {
   dropCard: document.getElementById("dropCard"),
@@ -85,7 +80,8 @@ const els = {
   timeoutClose: document.getElementById("timeoutClose"),
   timeoutTitle: document.getElementById("timeoutTitle"),
   btnReset: document.getElementById("btnReset"),
-  cdnPill: document.getElementById("cdnPill")
+  cdnPill: document.getElementById("cdnPill"),
+  appVersion: document.getElementById("appVersion")
 };
 
 const state = {
@@ -110,18 +106,34 @@ function setStatus(msg, cls) {
   els.status.className = "status " + (cls || "");
   els.status.textContent = msg;
 }
+
+// Build a KV row if needed; values default to blank
 function kvRow(id, label, value) {
   let row = document.getElementById(id);
   if (!row) {
     row = document.createElement("div");
     row.className = "kv";
     row.id = id;
-    row.innerHTML = `<div class="k">${label}</div><div class="v">—</div>`;
+    row.innerHTML = `<div class="k">${label}</div><div class="v"></div>`;
     els.results.appendChild(row);
   }
-  if (value !== undefined && value !== null)
-    row.querySelector(".v").textContent = String(value || "—");
+  if (value !== undefined && value !== null) {
+    row.querySelector(".v").textContent = String(value || "");
+  }
 }
+
+// Ensure titles are visible from the start with blank values
+function initResultSkeleton() {
+  kvRow("row-date", "Date", "");
+  kvRow("row-time", "Time", "");
+  kvRow("row-lat", "Latitude", "");
+  kvRow("row-lon", "Longitude", "");
+  kvRow("row-addr", "Address", "");
+  kvRow("row-ward", "Ward", "");
+  kvRow("row-beat", "Beat No.", "");
+  kvRow("row-ps", "Police Station", "");
+}
+
 function render() {
   const d = state.data;
   kvRow("row-date", "Date", d.date);
@@ -133,6 +145,7 @@ function render() {
   kvRow("row-beat", "Beat No.", d.BEAT_NO);
   kvRow("row-ps", "Police Station", d.PS_NAME);
 }
+
 function buildPrefillURL() {
   const p = new URLSearchParams({
     [ENTRY.date]: state.data.date || "",
@@ -147,6 +160,7 @@ function buildPrefillURL() {
   });
   return `https://docs.google.com/forms/d/e/${FORM_ID}/viewform?${p.toString()}`;
 }
+
 function applyChips(i) {
   els.ms.forEach((chip, idx) => {
     chip.classList.remove("pending", "active", "done");
@@ -156,10 +170,10 @@ function applyChips(i) {
   });
   els.bar.style.width = Math.max(0, Math.min(100, (i / 5) * 100)) + "%";
 }
+
 function fmt(ms) { return ms > 0 && isFinite(ms) ? (ms / 1000).toFixed(1) + "s" : "0.0s"; }
 function currentStageIndex() {
-  for (let i = 0; i < 6; i++)
-    if (state.stageStart[i] !== null && state.stageElapsed[i] === 0) return i;
+  for (let i = 0; i < 6; i++) if (state.stageStart[i] !== null && state.stageElapsed[i] === 0) return i;
   for (let i = 5; i >= 0; i--) if (state.stageElapsed[i] > 0) return Math.min(i + 1, 5);
   return 0;
 }
@@ -173,8 +187,7 @@ function updateTimes() {
 }
 function startStage(i) {
   if (state.timedOut) return;
-  for (let k = 0; k < i; k++)
-    if (state.stageStart[k] !== null && state.stageElapsed[k] === 0) endStage(k);
+  for (let k = 0; k < i; k++) if (state.stageStart[k] !== null && state.stageElapsed[k] === 0) endStage(k);
   state.stageStart[i] = Date.now();
   applyChips(i);
   if (!state.stageTicker) state.stageTicker = setInterval(updateTimes, 200);
@@ -182,8 +195,7 @@ function startStage(i) {
   state.stageTimeouts[i] = setTimeout(() => onStageTimeout(i), STAGE_LIMITS[i]);
 }
 function endStage(i) {
-  if (state.stageStart[i] !== null && state.stageElapsed[i] === 0)
-    state.stageElapsed[i] = Date.now() - state.stageStart[i];
+  if (state.stageStart[i] !== null && state.stageElapsed[i] === 0) state.stageElapsed[i] = Date.now() - state.stageStart[i];
   clearTimeout(state.stageTimeouts[i]);
   updateTimes();
 }
@@ -195,7 +207,7 @@ function onStageTimeout(i) {
 }
 
 /* ------------------------------------
-   GeoJSON loading + robust ward lookup
+   GeoJSON + robust lookup
    ------------------------------------ */
 function indexFC(fc) {
   const items = (fc.features || []).map(f => ({ f, b: turf.bbox(f) }));
@@ -213,9 +225,7 @@ function firstProp(props, keys) {
   return "";
 }
 function getBeat(props) {
-  const v = firstProp(props, [
-    "BEAT_NO","Beat_No","BEAT","Beat","BEATNO","BeatNo","beat_no","Beat_Number","BeatNumber"
-  ]);
+  const v = firstProp(props, ["BEAT_NO","Beat_No","BEAT","Beat","BEATNO","BeatNo","beat_no","Beat_Number","BeatNumber"]);
   if (v) return v;
   const n = props?.name || props?.NAME || "";
   const m = String(n).match(/Beat\s*([A-Za-z0-9]+)/i);
@@ -256,43 +266,26 @@ async function loadGeo() {
   state.gjIndex.wards  = indexFC(w);
   state.gjIndex.beats  = indexFC(b);
   state.gjIndex.police = indexFC(p);
-  state.counts = {
-    wards:  state.gjIndex.wards.n,
-    beats:  state.gjIndex.beats.n,
-    police: state.gjIndex.police.n
-  };
+  state.counts = { wards: state.gjIndex.wards.n, beats: state.gjIndex.beats.n, police: state.gjIndex.police.n };
   if (DEBUG) console.log("GeoJSON loaded:", state.counts);
 }
 function lookup(lat, lon) {
   const pt = [parseFloat(lon), parseFloat(lat)];
-  const ward = pipIndexed(
-    state.gjIndex.wards, pt,
-    p => firstProp(p, ["WARD","Ward","ward","WARD_NO","Ward_No","WARDNAME","WardName","NAME","name"])
-  );
+  const ward = pipIndexed(state.gjIndex.wards, pt, p => firstProp(p, ["WARD","Ward","ward","WARD_NO","Ward_No","WARDNAME","WardName","NAME","name"]));
   let beat = pipIndexed(state.gjIndex.beats, pt, p => getBeat(p));
-  let ps   = pipIndexed(
-    state.gjIndex.police, pt,
-    p => firstProp(p, ["PS_NAME","PS","Police_Station","PoliceStation","ps_name","PSName","PS_Name","name","NAME"])
-  );
+  let ps   = pipIndexed(state.gjIndex.police, pt, p => firstProp(p, ["PS_NAME","PS","Police_Station","PoliceStation","ps_name","PSName","PS_Name","name","NAME"]));
+
   if (!beat) {
-    const n = nearestIndexed(
-      state.gjIndex.beats, pt,
-      ["BEAT_NO","Beat_No","BEAT","Beat","BEATNO","BeatNo","beat_no","Beat_Number","BeatNumber","name","NAME"],
-      300
-    );
-    if (n.value) {
-      const m = String(n.value).match(/Beat\s*([A-Za-z0-9]+)/i);
-      beat = m ? m[1] : n.value;
-    }
+    const n = nearestIndexed(state.gjIndex.beats, pt,
+      ["BEAT_NO","Beat_No","BEAT","Beat","BEATNO","BeatNo","beat_no","Beat_Number","BeatNumber","name","NAME"], 300);
+    if (n.value) { const m = String(n.value).match(/Beat\s*([A-Za-z0-9]+)/i); beat = m ? m[1] : n.value; }
   }
   if (!ps) {
-    const n = nearestIndexed(
-      state.gjIndex.police, pt,
-      ["PS_NAME","PS","Police_Station","PoliceStation","ps_name","PSName","PS_Name","name","NAME"],
-      500
-    );
+    const n = nearestIndexed(state.gjIndex.police, pt,
+      ["PS_NAME","PS","Police_Station","PoliceStation","ps_name","PSName","PS_Name","name","NAME"], 500);
     if (n.value) ps = n.value;
   }
+
   const hasAny = !!(ward || beat || ps);
   const outside = !hasAny && !inMumbaiBBox(pt);
   if (DEBUG) console.log("Lookup:", { lat, lon, ward, beat, ps, hasAny, outside });
@@ -310,8 +303,7 @@ async function cropOverlay(dataURL) {
   const cropH = Math.max(120, Math.round(H * 0.38));
   const targetW = 1200;
   const scale = Math.min(1, targetW / W);
-  const outW = Math.round(W * scale);
-  const outH = Math.round(cropH * scale);
+  const outW = Math.round(W * scale), outH = Math.round(cropH * scale);
   const c = document.createElement("canvas");
   c.width = outW; c.height = outH;
   const ctx = c.getContext("2d");
@@ -331,58 +323,61 @@ async function cropOverlay(dataURL) {
 /* -------------------------
    Address parsing & cleanup
    ------------------------- */
-// allow Latin, digits, Devanagari, comma/period/slash/hyphen and spaces only
 function cleanAddress(addr) {
   let a = String(addr || "");
-
-  // remove plus-codes like "3RGW+GH5"
-  a = a.replace(/\b[\w]{3,}\+[\w]{2,}\b/gi, " ");
-
-  // keep only permitted chars (Latin, digits, Devanagari, basic separators)
-  a = a.replace(/[^0-9A-Za-z\u0900-\u097F ,./\-]/g, " ");
-
-  // trim obvious overlay keywords if they sneak in
+  a = a.replace(/\b[\w]{3,}\+[\w]{2,}\b/gi, " "); // remove plus-codes
+  a = a.replace(/[^0-9A-Za-z\u0900-\u097F ,./\-]/g, " "); // permit only safe characters
   a = a.replace(/\b(?:GPS|Map|Camera|Wind|Humidity|Pressure|Temperature|Google)\b.*$/i, " ");
-
-  // remove stray single-letter fragments between commas
   a = a.replace(/,\s*[A-Za-z\u0900-\u097F]\s*(?=,|$)/g, " ");
-
-  // collapse spaces & tidy commas
   a = a.replace(/\s{2,}/g, " ").replace(/\s*,\s*/g, ", ").replace(/,\s*,/g, ", ").replace(/^\s*,\s*|\s*,\s*$/g, "");
-
-  // de-dup duplicate "India"
   a = a.replace(/,?\s*India\s*,\s*India/i, ", India").trim();
-
   return a;
 }
 
-function normalizeDigits(s) {
-  return String(s || "")
-    .replace(/(\d)\s*[:·•]\s*(\d)/g, "$1.$2")
-    .replace(/(\d),(\d)/g, "$1.$2")
+// improved extractor (prevents lat=lon, swaps if reversed)
+function extractCoords(rawText) {
+  const norm = String(rawText || "")
+    .replace(/\u00A0|\u2009|\u2002|\u2003/g, " ")
     .replace(/[°]/g, "")
     .replace(/O/g, "0");
-}
-function extractCoords(rawText) {
-  const t = normalizeDigits(rawText);
+  const cleanNum = s => s.replace(/[,:\s]/g, ".");
+
   let lat = "", lon = "";
-  let m = t.match(/Lat(?:itude)?\s*[:=]?\s*([+-]?\d{1,2}[.:,]\d{2,})/i); if (m) lat = m[1].replace(/[:,]/g, ".");
-  m = t.match(/Lon(?:g|gitude)?\s*[:=]?\s*([+-]?\d{1,3}[.:,]\d{2,})/i);   if (m) lon = m[1].replace(/[:,]/g, ".");
+  let m = norm.match(/Lat(?:itude)?[^0-9+-]*([+-]?\d{1,2}[.,:]\d{2,})[^0-9+-]{0,30}Lon(?:g(?:itude)?)?[^0-9+-]*([+-]?\d{1,3}[.,:]\d{2,})/i);
+  if (m) { lat = cleanNum(m[1]); lon = cleanNum(m[2]); }
+
   if (!(lat && lon)) {
-    m = t.match(/([+-]?\d{1,2}[.:,]\d{2,})[^\d+-]{0,30}([+-]?\d{1,3}[.:,]\d{2,})/);
-    if (m) { lat = lat || m[1].replace(/[:,]/g, "."); lon = lon || m[2].replace(/[:,]/g, "."); }
+    m = norm.match(/Lon(?:g(?:itude)?)?[^0-9+-]*([+-]?\d{1,3}[.,:]\d{2,})[^0-9+-]{0,30}Lat(?:itude)?[^0-9+-]*([+-]?\d{1,2}[.,:]\d{2,})/i);
+    if (m) { lon = cleanNum(m[1]); lat = cleanNum(m[2]); }
   }
+  if (!lat) { m = norm.match(/Lat(?:itude)?[^0-9+-]*([+-]?\d{1,2}[.,:]\d{2,})/i); if (m) lat = cleanNum(m[1]); }
+  if (!lon) { m = norm.match(/Lon(?:g(?:itude)?)?[^0-9+-]*([+-]?\d{1,3}[.,:]\d{2,})/i); if (m) lon = cleanNum(m[1]); }
+
   if (!(lat && lon)) {
-    const nums = [...t.matchAll(/[+-]?\d{1,3}[.:,]\d{2,}/g)].map(x => x[0].replace(/[:,]/g, "."));
+    const nums = [...norm.matchAll(/[+-]?\d{1,3}[.,:]\d{2,}/g)].map(x => cleanNum(x[0]));
     if (nums.length >= 2) { lat = lat || nums[0]; lon = lon || nums[1]; }
   }
-  const toNum = s => { const v = parseFloat(s); return isFinite(v) ? v : null; };
-  const la = toNum(lat), lo = toNum(lon);
-  return {
-    lat: la != null && la >= -90  && la <= 90  ? String(la) : "",
-    lon: lo != null && lo >= -180 && lo <= 180 ? String(lo) : ""
-  };
+
+  let la = parseFloat(lat), lo = parseFloat(lon);
+  const okLat = v => isFinite(v) && v >= -90 && v <= 90;
+  const okLon = v => isFinite(v) && v >= -180 && v <= 180;
+
+  if (!okLat(la)) la = NaN;
+  if (!okLon(lo)) lo = NaN;
+
+  const looksLikeMumbaiLat = v => v > 18 && v < 21;
+  const looksLikeMumbaiLon = v => v > 72 && v < 73;
+
+  if (okLat(la) && okLon(lo) && Math.abs(la - lo) < 1e-6) {
+    if (looksLikeMumbaiLon(la)) la = NaN;
+  }
+  if (okLat(la) && okLon(lo)) {
+    if (looksLikeMumbaiLon(la) && looksLikeMumbaiLat(lo)) { const t = la; la = lo; lo = t; }
+  }
+
+  return { lat: okLat(la) ? String(la) : "", lon: okLon(lo) ? String(lo) : "" };
 }
+
 function parseAll(text) {
   const raw = String(text || "")
     .replace(/\u00A0|\u2009|\u2002|\u2003/g, " ")
@@ -393,203 +388,4 @@ function parseAll(text) {
   const linesAll = raw.split(/\n+/).map(s => s.trim()).filter(Boolean);
 
   const isNoise      = s => /(?:gps\s*map\s*camera|google|wind|humidity|pressure|temperature|km\/h|hpa|°c|\bjoey\b)/i.test(s);
-  const looksTime    = s => /\b\d{1,2}:\d{2}\s*(?:AM|PM)?\b/i.test(s);
-  const looksDate    = s => /\b\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}\b/.test(s);
-  const isLatLonLine = s => /\bLat|Lon(?:g|gitude)\b/i.test(s);
-
-  const { lat, lon } = extractCoords(raw);
-
-  let date = "", time = "";
-  const toIsoDate = s => { const m = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/); if (!m) return ""; let [_, d, mo, y] = m; if (y.length === 2) y = +y < 50 ? "20" + y : "19" + y; return `${y}-${mo.padStart(2,"0")}-${d.padStart(2,"0")}`; };
-  const to24h = s   => { s = s.toUpperCase(); const m = s.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/); if (!m) return ""; let h = +m[1], mi = m[2], ap = m[3] || ""; if (ap === "PM" && h < 12) h += 12; if (ap === "AM" && h === 12) h = 0; return `${String(h).padStart(2,"0")}:${mi}`; };
-  const dt = raw.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}).{0,6}(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i);
-  if (dt) { date = toIsoDate(dt[1]); time = to24h(dt[2]); }
-
-  const looksAddressy = s =>
-    /\p{L}/u.test(s) && !isNoise(s) && !looksDate(s) && !looksTime(s) && !isLatLonLine(s) &&
-    (/,/.test(s) || s.split(/\s+/).filter(x => x.length >= 3).length >= 3);
-
-  let idxLat = linesAll.findIndex(isLatLonLine); if (idxLat < 0) idxLat = linesAll.length;
-  const cand = [];
-  for (let i = idxLat - 1; i >= 0 && cand.length < 3; i--) {
-    const s = linesAll[i];
-    if (looksAddressy(s)) cand.unshift(s); else if (cand.length) break;
-  }
-
-  let address = cand.length
-    ? cand.join(", ")
-    : (linesAll.filter(looksAddressy).sort((a,b) => b.length - a.length)[0] || "");
-
-  // final polish
-  const pin = raw.match(/\b[1-9]\d{5}\b/);
-  address = cleanAddress(address);
-  if (pin && !address.includes(pin[0]))
-    address = address.replace(/(?:,\s*)?(India)\s*$/i, (m,$1)=>`, ${pin[0]}, ${$1}`);
-
-  return { lat, lon, address, date, time };
-}
-
-/* ---------
-   Redirect
-   --------- */
-function startRedirectCountdown(sec) {
-  clearInterval(state.countdownTimer);
-  els.redirectNote.style.display = "block";
-  let left = sec;
-  els.redirectNote.innerHTML =
-    `All set. Redirecting to Google Form in <span class="countdown">${left}s</span>… ` +
-    `<a href="#" id="cancelRedirect">Cancel</a>`;
-  state.countdownTimer = setInterval(() => {
-    left -= 1;
-    const span = document.querySelector(".countdown");
-    if (span) span.textContent = left + "s";
-    if (left <= 0) { clearInterval(state.countdownTimer); window.location.href = buildPrefillURL(); }
-  }, 1000);
-  els.redirectNote.onclick = (e) => {
-    if (e.target && e.target.id === "cancelRedirect") {
-      e.preventDefault();
-      clearInterval(state.countdownTimer);
-      els.redirectNote.innerHTML = `<button id="openFormNow" class="btn">Open Google Form now</button>`;
-      document.getElementById("openFormNow").onclick = () => (window.location.href = buildPrefillURL());
-    }
-  };
-}
-
-/* ---------------
-   Event bindings
-   --------------- */
-els.btnReset.addEventListener("click", () => location.reload());
-els.modalCancel.addEventListener("click", () => (els.modalBackdrop.style.display = "none"));
-els.modalReset.addEventListener("click", () => location.reload());
-els.timeoutRetry.addEventListener("click", () => location.reload());
-els.timeoutClose.addEventListener("click", () => (els.timeoutBackdrop.style.display = "none"));
-els.drop.addEventListener("click", () => els.file.click());
-els.drop.addEventListener("dragover", (e) => { e.preventDefault(); els.drop.style.borderColor = "#9ec5ff"; });
-els.drop.addEventListener("dragleave", () => { els.drop.style.borderColor = "#cfe0f3"; });
-els.drop.addEventListener("drop", (e) => {
-  e.preventDefault();
-  els.drop.style.borderColor = "#cfe0f3";
-  const f = e.dataTransfer.files?.[0];
-  if (f) runPipeline(f);
-});
-els.file.addEventListener("change", (e) => {
-  const f = e.target.files?.[0];
-  if (f) runPipeline(f);
-});
-
-/* ----------
-   Pipeline
-   ---------- */
-async function runPipeline(file) {
-  const myRun = ++state.activeRun;
-
-  els.dropCard.style.display = "none";
-  els.originalCard.style.display = "block";
-  els.overlayCard.style.display = "block";
-  els.overlayWrap.style.display = "block";
-
-  // Stage 0: Upload
-  startStage(0);
-  setStatus("Image loading…", "ok");
-
-  const reader = new FileReader();
-  reader.onload = async () => {
-    if (myRun !== state.activeRun) return;
-
-    const dataUrl = reader.result;
-    els.originalImg.src = dataUrl;
-
-    setStatus("Optimising image…", "warn");
-    const cropped = await cropOverlay(dataUrl);
-    if (myRun !== state.activeRun) return;
-    endStage(0);
-
-    // Stage 1: OCR
-    startStage(1);
-    setStatus("Running OCR…", "warn");
-    state.croppedUrl = cropped;
-    els.overlayImg.src = state.croppedUrl;
-    els.overlayScanner.style.display = "block";
-
-    async function ocrV5() { const { data:{ text } } = await Tesseract.recognize(state.croppedUrl, "eng+hin"); return text; }
-    async function ocrV4() {
-      if (!window.Tesseract?.recognize)
-        await addScript("https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js");
-      const { data:{ text } } = await Tesseract.recognize(state.croppedUrl, "eng+hin"); return text;
-    }
-
-    let text = "";
-    try { text = await ocrV5(); }
-    catch (e) {
-      console.warn("v5 OCR failed → fallback v4", e);
-      try { text = await ocrV4(); }
-      catch (e2) { els.overlayScanner.style.display = "none"; setStatus("OCR failed in both engines. Please Retry.", "err"); onStageTimeout(1); return; }
-    }
-
-    els.overlayScanner.style.display = "none";
-    endStage(1);
-
-    // Stage 2: Parse
-    startStage(2);
-    setStatus("Parsing extracted text…", "warn");
-    Object.assign(state.data, parseAll(text));
-    render();
-    if (DEBUG) console.log("Parsed:", state.data);
-    endStage(2);
-
-    // Stage 3: GeoJSON
-    startStage(3);
-    setStatus("GeoJSON lookup…", "warn");
-    state.outside = false;
-
-    if (state.data.lat && state.data.lon) {
-      const g = lookup(state.data.lat, state.data.lon);
-      const { outside, ...vals } = g;
-      Object.assign(state.data, vals);
-      render();
-      state.outside = outside;
-    } else {
-      state.outside = true;
-      if (DEBUG) console.warn("Missing lat/lon → outside flagged");
-    }
-    endStage(3);
-
-    if (state.outside) {
-      setStatus("Outside MCGM Boundaries — Not allowed.", "err");
-      els.modalBackdrop.style.display = "flex";
-      return;
-    }
-
-    // Stage 4: Review
-    startStage(4);
-    setStatus(`Ready. GeoJSON loaded (W:${state.counts.wards} B:${state.counts.beats} PS:${state.counts.police}). Review the results.`, "ok");
-    endStage(4);
-
-    // Stage 5: Redirect
-    startStage(5);
-    startRedirectCountdown(5);
-  };
-
-  reader.readAsDataURL(file);
-}
-
-/* ----
-   Boot
-   ---- */
-(async () => {
-  els.modalBackdrop.style.display = "none";
-  els.timeoutBackdrop.style.display = "none";
-
-  await loadOCR();
-  try {
-    await loadGeo();
-    setStatus(`Maps loaded. W:${state.counts.wards} • B:${state.counts.beats} • PS:${state.counts.police}. Upload an image to begin.`, "ok");
-  } catch (e) {
-    console.error(e);
-    setStatus("Could not load GeoJSON (check /data paths & filenames).", "err");
-  }
-
-  updateTimes();
-  const vEl = document.getElementById("appVersion");
-  if (vEl) vEl.textContent = "v2025.08.17";
-})();
+ 
