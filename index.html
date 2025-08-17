@@ -108,58 +108,12 @@ a:hover{text-decoration:underline}
 .footer-inner a{color:#ffd166; font-weight:600}
 </style>
 
-<!-- Turf -->
+<!-- Turf (spatial) -->
 <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.2.0/turf.min.js"></script>
-
-<!-- Tesseract robust loader: v5 jsDelivr → v5 unpkg → v4 (no x.map) -->
-<script>
-window.__OCR_CDNS__ = {
-  v5_jsd:{label:"v5 (jsDelivr)",lib:'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js',core:['https://cdn.jsdelivr.net/npm/tesseract.js-core@5'],langs:['https://cdn.jsdelivr.net/npm/@tesseract.js-data']},
-  v5_unp:{label:"v5 (unpkg)",   lib:'https://unpkg.com/tesseract.js@5/dist/tesseract.min.js',          core:['https://unpkg.com/tesseract.js-core@5'],           langs:['https://unpkg.com/@tesseract.js-data']},
-  v4_jsd:{label:"v4 (jsDelivr)",lib:'https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js'}
-};
-(function(){
-  const addScript=(src)=>new Promise((res,rej)=>{const s=document.createElement('script'); s.src=src+(src.includes('?')?'&':'?')+'v=ok'; s.onload=res; s.onerror=rej; document.head.appendChild(s);});
-  const toArr=x=>Array.isArray(x)?x:[x];
-  async function tryV5(cfg){
-    await addScript(cfg.lib);
-    window.__OCR_VERSION__=cfg.label;
-    if(window.Tesseract?.createWorker){
-      const _cw=Tesseract.createWorker;
-      Tesseract.createWorker=function(opts={}){
-        const o={...opts};
-        if(!o.corePath) o.corePath=cfg.core;
-        if(!o.langPath) o.langPath=cfg.langs;
-        o.corePath=toArr(o.corePath); o.langPath=toArr(o.langPath);
-        if(o.logger) delete o.logger; // avoid DataCloneError
-        return _cw.call(Tesseract,o);
-      };
-    }
-    if(window.Tesseract?.recognize){
-      const _rec=Tesseract.recognize;
-      Tesseract.recognize=function(img,langs='eng',opts={}){
-        const o={...opts};
-        if(!o.corePath) o.corePath=cfg.core;
-        if(!o.langPath) o.langPath=cfg.langs;
-        o.corePath=toArr(o.corePath); o.langPath=toArr(o.langPath);
-        if(o.logger) delete o.logger;
-        return _rec.call(Tesseract,img,langs,o);
-      };
-    }
-  }
-  (async()=>{
-    const pill=document.getElementById('cdnPill');
-    try{await tryV5(window.__OCR_CDNS__.v5_jsd); pill.textContent='CDN: v5 (jsDelivr)'; pill.classList.add('ok');}
-    catch{try{await tryV5(window.__OCR_CDNS__.v5_unp); pill.textContent='CDN: v5 (unpkg)'; pill.classList.add('ok');}
-    catch{try{await addScript(window.__OCR_CDNS__.v4_jsd.lib); window.__OCR_VERSION__='v4 (fallback)'; pill.textContent='CDN: v4 (fallback)'; pill.classList.add('ok');}
-    catch(e){pill.textContent='CDN: unavailable'; pill.classList.add('err'); console.error('Tesseract load failed',e);}}}
-  })();
-})();
-</script>
 </head>
 <body>
 
-<!-- HEADER -->
+<!-- ===== HEADER ===== -->
 <div class="masthead">
   <div class="topbar">
     <div class="topbar-inner">
@@ -195,12 +149,13 @@ window.__OCR_CDNS__ = {
   </div>
 </div>
 
-<!-- BREADCRUMBS -->
+<!-- Breadcrumbs -->
 <div class="crumbs"><div class="crumbs-inner"><a href="https://www.mcgm.gov.in" target="_blank" rel="noopener">Home</a> › Abandoned Vehicles › Marshal Upload</div></div>
 
-<!-- MAIN -->
+<!-- ===== MAIN ===== -->
 <div class="wrap">
   <div class="grid">
+    <!-- Left: Image -->
     <div class="col-image">
       <div id="dropCard" class="card">
         <div class="hdr"><div class="title">Upload Photo</div></div>
@@ -228,6 +183,7 @@ window.__OCR_CDNS__ = {
       </div>
     </div>
 
+    <!-- Right: Results -->
     <div class="col-results">
       <div class="card">
         <div class="hdr"><div class="title">Results</div></div>
@@ -237,7 +193,7 @@ window.__OCR_CDNS__ = {
   </div>
 </div>
 
-<!-- FOOTER -->
+<!-- ===== FOOTER ===== -->
 <div class="footer">
   <div class="footer-inner">
     Developed by <strong>Crescendo Innovative Solutions LLP</strong>. All rights reserved by <strong>Crescendo</strong> •
@@ -248,7 +204,7 @@ window.__OCR_CDNS__ = {
   </div>
 </div>
 
-<!-- MODALS -->
+<!-- ===== MODALS ===== -->
 <div id="modalBackdrop" class="modal-backdrop" role="dialog" aria-modal="true">
   <div class="modal">
     <div class="m-hdr">Outside MCGM Boundaries — Not allowed</div>
@@ -275,6 +231,39 @@ window.__OCR_CDNS__ = {
   </div>
 </div>
 
+<!-- ===== SCRIPTS (after DOM so #cdnPill exists) ===== -->
+<script>
+/* ---------- OCR CDN loader (runs after DOM) ---------- */
+window.__OCR_CDNS__ = {
+  v5_jsd:{label:"v5 (jsDelivr)",lib:'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js',core:['https://cdn.jsdelivr.net/npm/tesseract.js-core@5'],langs:['https://cdn.jsdelivr.net/npm/@tesseract.js-data']},
+  v5_unp:{label:"v5 (unpkg)",   lib:'https://unpkg.com/tesseract.js@5/dist/tesseract.min.js',          core:['https://unpkg.com/tesseract.js-core@5'],           langs:['https://unpkg.com/@tesseract.js-data']},
+  v4_jsd:{label:"v4 (jsDelivr)",lib:'https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js'}
+};
+function addScript(src){return new Promise((res,rej)=>{const s=document.createElement('script'); s.src=src+(src.includes('?')?'&':'?')+'v=ok'; s.onload=res; s.onerror=rej; document.head.appendChild(s);});}
+function toArr(x){return Array.isArray(x)?x:[x];}
+function setPill(text,cls){const el=document.getElementById('cdnPill'); if(!el) return; el.textContent=text; el.classList.remove('ok','err'); if(cls) el.classList.add(cls);}
+async function tryV5(cfg){
+  await addScript(cfg.lib);
+  window.__OCR_VERSION__=cfg.label;
+  if(window.Tesseract?.createWorker){
+    const _cw=Tesseract.createWorker;
+    Tesseract.createWorker=function(opts={}){const o={...opts}; if(!o.corePath) o.corePath=cfg.core; if(!o.langPath) o.langPath=cfg.langs; o.corePath=toArr(o.corePath); o.langPath=toArr(o.langPath); if(o.logger) delete o.logger; return _cw.call(Tesseract,o);};
+  }
+  if(window.Tesseract?.recognize){
+    const _rec=Tesseract.recognize;
+    Tesseract.recognize=function(img,langs='eng',opts={}){const o={...opts}; if(!o.corePath) o.corePath=cfg.core; if(!o.langPath) o.langPath=cfg.langs; o.corePath=toArr(o.corePath); o.langPath=toArr(o.langPath); if(o.logger) delete o.logger; return _rec.call(Tesseract,img,langs,o);};
+  }
+}
+window.addEventListener('DOMContentLoaded', async ()=>{
+  try{ await tryV5(window.__OCR_CDNS__.v5_jsd); setPill('CDN: v5 (jsDelivr)','ok'); }
+  catch{ try{ await tryV5(window.__OCR_CDNS__.v5_unp); setPill('CDN: v5 (unpkg)','ok'); }
+    catch{ try{ await addScript(window.__OCR_CDNS__.v4_jsd.lib); window.__OCR_VERSION__='v4 (fallback)'; setPill('CDN: v4 (fallback)','ok'); }
+      catch(e){ setPill('CDN: unavailable','err'); console.error('Tesseract load failed',e); }
+    }
+  }
+});
+</script>
+
 <script>
 /* ===== config ===== */
 const FORM_ID="1FAIpQLSeo-xlOSxvG0IwtO5MkKaTJZNJkgTsmgZUw-FBsntFlNdRnCw";
@@ -282,14 +271,30 @@ const ENTRY={date:"entry.1911996449",time:"entry.1421115881",lon:"entry.11312268
 const STAGE_LIMITS=[20000,90000,12000,15000,45000,20000];
 
 const els={
-  dropCard:dropCard, drop:drop, file:file,
-  originalCard:originalCard, originalImg:originalImg,
-  overlayCard:overlayCard, overlayWrap:overlayWrap, overlayImg:overlayImg, overlayScanner:overlayScanner,
-  status:status, bar:bar, results:results, redirectNote:redirectNote, stageTimes:stageTimes,
+  dropCard:document.getElementById('dropCard'),
+  drop:document.getElementById('drop'),
+  file:document.getElementById('file'),
+  originalCard:document.getElementById('originalCard'),
+  originalImg:document.getElementById('originalImg'),
+  overlayCard:document.getElementById('overlayCard'),
+  overlayWrap:document.getElementById('overlayWrap'),
+  overlayImg:document.getElementById('overlayImg'),
+  overlayScanner:document.getElementById('overlayScanner'),
+  status:document.getElementById('status'),
+  bar:document.getElementById('bar'),
+  results:document.getElementById('results'),
+  redirectNote:document.getElementById('redirectNote'),
+  stageTimes:document.getElementById('stageTimes'),
   ms:[...document.querySelectorAll('.milestones .chip')],
-  modalBackdrop:modalBackdrop, modalCancel:modalCancel, modalReset:modalReset,
-  timeoutBackdrop:timeoutBackdrop, timeoutRetry:timeoutRetry, timeoutClose:timeoutClose, timeoutTitle:timeoutTitle,
-  btnReset:btnReset, cdnPill:cdnPill
+  modalBackdrop:document.getElementById('modalBackdrop'),
+  modalCancel:document.getElementById('modalCancel'),
+  modalReset:document.getElementById('modalReset'),
+  timeoutBackdrop:document.getElementById('timeoutBackdrop'),
+  timeoutRetry:document.getElementById('timeoutRetry'),
+  timeoutClose:document.getElementById('timeoutClose'),
+  timeoutTitle:document.getElementById('timeoutTitle'),
+  btnReset:document.getElementById('btnReset'),
+  cdnPill:document.getElementById('cdnPill')
 };
 const state={
   activeRun:0,croppedUrl:"",outside:false,timedOut:false,
@@ -298,7 +303,6 @@ const state={
   stageStart:Array(6).fill(null), stageElapsed:Array(6).fill(0), stageTimeouts:Array(6).fill(null), stageTicker:null,
   countdownTimer:null
 };
-const A=x=>Array.isArray(x)?x:[x];
 
 /* ui helpers */
 function setStatus(m,c){els.status.className='status '+(c||''); els.status.textContent=m;}
@@ -385,10 +389,10 @@ async function cropOverlay(dataURL){
 /* ===== Coord helpers & parsing ===== */
 function normalizeDigits(s){
   return String(s||"")
-    .replace(/(\d)\s*[:·•]\s*(\d)/g,'$1.$2')  // colon/center-dot → dot
-    .replace(/(\d),(\d)/g,'$1.$2')            // comma → dot
-    .replace(/[°]/g,'')                       // remove degree symbol
-    .replace(/O/g,'0');                       // letter O → 0
+    .replace(/(\d)\s*[:·•]\s*(\d)/g,'$1.$2')
+    .replace(/(\d),(\d)/g,'$1.$2')
+    .replace(/[°]/g,'')
+    .replace(/O/g,'0');
 }
 function extractCoords(rawText){
   const t = normalizeDigits(rawText);
@@ -523,8 +527,22 @@ async function runPipeline(file){
   reader.readAsDataURL(file);
 }
 
+/* timing/steps UI */
+function fmt(ms){return(ms>0&&isFinite(ms))?(ms/1000).toFixed(1)+'s':'0.0s';}
+function currentStageIndex(){for(let i=0;i<6;i++){if(state.stageStart[i]!==null&&state.stageElapsed[i]===0) return i;} for(let i=5;i>=0;i--) if(state.stageElapsed[i]>0) return Math.min(i+1,5); return 0;}
+function updateTimes(){const names=["Upload","OCR","Parse","GeoJSON","Review","Redirect"]; els.stageTimes.textContent=names.map((n,i)=>{const run=state.stageStart[i]!==null&&i===currentStageIndex(); const v=run?(Date.now()-state.stageStart[i]):state.stageElapsed[i]; return `${n} — ${fmt(v)}`;}).join(' • ');}
+function startStage(i){if(state.timedOut) return; for(let k=0;k<i;k++){if(state.stageStart[k]!==null&&state.stageElapsed[k]===0) endStage(k);} state.stageStart[i]=Date.now(); applyChips(i); if(!state.stageTicker) state.stageTicker=setInterval(updateTimes,200); clearTimeout(state.stageTimeouts[i]); state.stageTimeouts[i]=setTimeout(()=>onStageTimeout(i),STAGE_LIMITS[i]);}
+function endStage(i){if(state.stageStart[i]!==null&&state.stageElapsed[i]===0) state.stageElapsed[i]=Date.now()-state.stageStart[i]; clearTimeout(state.stageTimeouts[i]); updateTimes();}
+function applyChips(i){els.ms.forEach((chip,idx)=>{chip.classList.remove('pending','active','done'); if(idx<i) chip.classList.add('done'); else if(idx===i) chip.classList.add('active'); else chip.classList.add('pending');}); els.bar.style.width=Math.max(0,Math.min(100,(i/5)*100))+'%';}
+function onStageTimeout(i){if(state.stageElapsed[i]>0||state.timedOut) return; state.timedOut=true; els.timeoutBackdrop.style.display='flex'; els.timeoutTitle.textContent=`Stage Timed Out — ${["Upload","OCR","Parse","GeoJSON","Review","Redirect"][i]}`;}
+
 /* bootstrap */
-(async()=>{try{await loadGeo(); setStatus("Maps loaded. Upload an image to begin.","ok");}catch(e){console.error(e); setStatus("Could not load GeoJSON (check /data paths).","err");} updateTimes(); document.getElementById('appVersion')?.textContent='v2025.08.17';})();
+(async()=>{
+  try{await loadGeo(); setStatus("Maps loaded. Upload an image to begin.","ok");}
+  catch(e){console.error(e); setStatus("Could not load GeoJSON (check /data paths).","err");}
+  updateTimes();
+  const vEl=document.getElementById('appVersion'); if(vEl){ vEl.textContent='v2025.08.17'; }
+})();
 </script>
 </body>
 </html>
