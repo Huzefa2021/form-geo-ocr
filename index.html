@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>MCGM | Abandoned Vehicles – Marshal Upload</title>
   <link rel="icon" href="favicon.ico">
   <link rel="preconnect" href="https://cdn.jsdelivr.net" />
@@ -22,20 +24,13 @@
     </div>
 
     <div class="toolbar">
-      <div class="select-wrap">
-        <label for="ocrMode">OCR Mode:</label>
-        <select id="ocrMode" title="Choose OCR language mode">
-          <option value="auto">Auto</option>
-          <option value="eng">ENG</option>
-          <option value="indic">ENG+Indic</option>
-        </select>
-      </div>
+      <span class="mode-pill" title="OCR auto-detects Devanagari and upgrades to Marathi when useful">OCR: Auto</span>
       <button id="btnReset" class="btn ghost">Reset</button>
-      <img class="cres-logo" src="data/Crescendo Logo.png" alt="Crescendo IT Solutions" />
+      <img class="cres-logo" src="data/Crescendo Logo.png" alt="Crescendo Innovative Solutions LLP" />
     </div>
   </header>
 
-  <!-- Chips + progress + rail info (elapsed + status) -->
+  <!-- Milestones + Progress + Load info -->
   <div class="top-rail">
     <ul class="milestones">
       <li class="chip" data-i="0">Upload</li>
@@ -48,10 +43,12 @@
 
     <div class="progress"><span id="bar"></span></div>
 
-    <!-- NEW: rail info right below the bar -->
+    <!-- Elapsed + load details directly under the bar -->
     <div class="rail-info">
       <span id="railStatus" class="status">Initializing…</span>
-      <span id="railTimes" class="times">Upload — 0.0s • OCR — 0.0s • Parse — 0.0s • GeoJSON — 0.0s • Review — 0.0s • Redirect — 0.0s</span>
+      <span id="railTimes" class="times">
+        Upload — 0.0s • OCR — 0.0s • Parse — 0.0s • GeoJSON — 0.0s • Review — 0.0s • Redirect — 0.0s
+      </span>
     </div>
 
     <div class="cdn-pill" id="cdnPill">CDN: checking…</div>
@@ -65,7 +62,7 @@
   <!-- Content -->
   <main class="container">
     <section class="grid">
-      <!-- Left Column -->
+      <!-- Left: Upload + Images -->
       <div>
         <div class="card" id="dropCard">
           <h3>Upload Photo</h3>
@@ -94,12 +91,14 @@
         </div>
       </div>
 
-      <!-- Right Column -->
+      <!-- Right: Results -->
       <div>
         <div class="card">
           <h3>Results</h3>
           <div id="results"></div>
-          <div id="resultsNote" class="note">Results will be populated post processing.</div>
+          <div id="resultsNote" class="note">
+            Results will be populated post processing.
+          </div>
         </div>
       </div>
     </section>
@@ -107,7 +106,7 @@
     <div id="redirectNote" class="redirect hidden"></div>
   </main>
 
-  <!-- Sticky Footer (two rows, saffron line at top) -->
+  <!-- Sticky Footer (two lines, saffron line at top) -->
   <footer class="app-footer">
     <div class="footer-row">
       <strong>Developed by</strong> Crescendo Innovative Solutions LLP ·
@@ -147,10 +146,10 @@
     </div>
   </div>
 
-  <!-- Turf for GeoJSON -->
+  <!-- Geo utils -->
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
 
-  <!-- Keep this to enable OpenCV-based preprocessing when available -->
+  <!-- Keep this to enable OpenCV preprocessing when available -->
   <script async src="https://docs.opencv.org/4.x/opencv.js"
           onload="window.__cvLoaded=true"
           onerror="window.__cvLoaded=false"></script>
