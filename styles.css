@@ -315,3 +315,9 @@ a:hover { text-decoration: underline; }
   text-align: center;
 }
 .footer-inner a { color: #ffd166; font-weight: 600; }
+
+.footer-inner { line-height: 1.5; }
+
+.footer-inner .line { display: block; margin: 4px 0; }
+
+.footer-inner .build { margin-top: 8px; opacity: 0.9; font-size: 12px; }
