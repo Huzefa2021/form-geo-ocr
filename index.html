@@ -5,6 +5,9 @@
   <title>MCGM | Abandoned Vehicles – Marshal Upload Portal</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 
+  <!-- Perf: preconnect to CDN for Tesseract assets -->
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+
   <!-- Fonts: Roboto + Noto Sans Devanagari (MCGM-like) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -19,6 +22,7 @@
       --shadow-card: 0 6px 22px rgba(10,25,55,.10), 0 1px 0 rgba(10,25,55,.06);
       --shadow-img:  0 10px 24px rgba(0,0,0,.12);
       --shadow-hover:0 18px 40px rgba(16,38,74,.18);
+      --shadow-float:0 12px 30px rgba(10,25,55,.22);
     }
     *{box-sizing:border-box}
     html,body{height:100%}
@@ -31,14 +35,62 @@
     a{color:var(--mcgm-blue); text-decoration:none}
     a:hover{text-decoration:underline}
 
-    /* Header */
-    .topbar{background:var(--mcgm-blue); color:#fff; border-bottom:4px solid var(--mcgm-orange)}
+    /* ========== Sticky Masthead (Header + Progress) ========== */
+    .masthead{
+      position: sticky; top: 0; z-index: 1000;
+      background: #fff;
+      box-shadow: var(--shadow-float);
+      border-bottom: 4px solid var(--mcgm-orange);
+    }
+    .topbar{background:var(--mcgm-blue); color:#fff}
     .topbar-inner{max-width:1180px; margin:0 auto; padding:10px 16px; display:flex; align-items:center; gap:12px}
     .topbar img{height:48px; width:auto}
     .brand-title{font-weight:700; font-size:clamp(16px,2.6vw,20px); line-height:1.2}
     .brand-sub{font-size:clamp(12px,2vw,14px); opacity:.9}
     .header-actions{margin-left:auto}
     .btn-reset{padding:8px 12px; border-radius:8px; border:1px solid #cfe0f3; background:#f7fbff; color:#0c3963; cursor:pointer; font-weight:600}
+
+    /* Progress strip right below header */
+    .progress-strip{
+      background:linear-gradient(180deg,#ffffff 0%, #f6f9ff 100%);
+      border-top:1px solid #e7eef7;
+      border-bottom:1px solid #e7eef7;
+    }
+    .progress-inner{max-width:1180px; margin:0 auto; padding:10px 16px}
+    .milestones{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
+    .chip{
+      display:inline-flex; align-items:center; gap:8px;
+      padding:6px 10px; border-radius:999px; border:1px solid var(--line);
+      background:#f4f8ff; color:#0c3963; font-size:clamp(12px,2vw,13px);
+      transition: box-shadow .25s ease, background .25s ease, border-color .25s ease;
+    }
+    .chip .ico{position:relative; width:14px; height:14px; border-radius:50%; flex:0 0 14px}
+    /* PENDING (grey ring) */
+    .chip.pending .ico{ border:2px solid #b9c7d6; background:#fff; }
+    /* ACTIVE (spinner, orange glow) */
+    .chip.active{ box-shadow:0 0 0 3px rgba(245,158,11,.18), 0 0 18px rgba(245,158,11,.35); border-color:#ffd166; background:#fff8eb; }
+    .chip.active .ico{
+      border:2px solid #f59e0b; border-top-color:transparent; border-right-color:transparent;
+      animation:spin 1s linear infinite; background:#fff;
+    }
+    /* DONE (green tick, green glow) */
+    .chip.done{ box-shadow:0 0 0 3px rgba(25,135,84,.18), 0 0 18px rgba(25,135,84,.35); border-color:#b9e8cc; background:#eefcf4; }
+    .chip.done .ico{ background:#198754; }
+    .chip.done .ico::after{
+      content:""; position:absolute; left:3px; top:1px; width:4px; height:8px;
+      border-right:2px solid #fff; border-bottom:2px solid #fff; transform:rotate(45deg);
+    }
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    /* Progress bar */
+    .bar{height:10px; border-radius:999px; background:#e9f1fb; border:1px solid var(--line); overflow:hidden; margin-top:8px}
+    .bar-fill{height:100%; width:0%; background:linear-gradient(90deg,#ffbd59,#ffd166); transition:width .35s ease}
+
+    .strip-row{display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:8px}
+    .status{font-size:clamp(12px,2vw,13px)}
+    .ok{color:var(--ok)} .warn{color:var(--warn)} .err{color:var(--err)}
+    .countdown{font-weight:700; color:#0b5aa3}
+    .stage-times{font-size:12px; color:#3a5677}
 
     /* Breadcrumb */
     .crumbs{background:#eef4fb; border-bottom:1px solid var(--line)}
@@ -54,7 +106,6 @@
       grid-template-columns: 1fr;
       grid-template-areas:
         "image"
-        "progress"
         "results";
       gap:12px;
     }
@@ -62,13 +113,11 @@
       .grid{
         grid-template-columns: 430px 1fr;
         grid-template-areas:
-          "image progress"
           "image results";
         gap:18px;
       }
     }
     .col-image{grid-area:image}
-    .col-progress{grid-area:progress}
     .col-results{grid-area:results}
 
     /* Cards */
@@ -81,21 +130,7 @@
     .card .hdr .title{font-weight:700; color:#143a63}
     .card .body{padding:12px}
 
-    /* Sticky progress card */
-    .sticky{ position: sticky; top: 8px; z-index: 10; }
-
-    /* Milestones */
-    .milestones{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px}
-    .chip{display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; border:1px solid var(--line); background:#f4f8ff; color:#0c3963; font-size:clamp(12px,2vw,13px)}
-    .chip .dot{width:8px; height:8px; border-radius:50%; background:#9ec5ff}
-    .chip.active .dot{background:#ffd166}
-    .chip.done .dot{background:#37b24d}
-
-    /* Progress bar */
-    .bar{height:10px; border-radius:999px; background:#e9f1fb; border:1px solid var(--line); overflow:hidden}
-    .bar-fill{height:100%; width:0%; background:linear-gradient(90deg,#ffbd59,#ffd166); transition:width .35s ease}
-
-    /* Dropzone (removed after upload) */
+    /* Dropzone */
     .drop{
       border:2px dashed #cfe0f3; border-radius:var(--radius); min-height:120px;
       display:grid; place-items:center; text-align:center; padding:18px; cursor:pointer;
@@ -112,20 +147,24 @@
       border-radius:12px; padding:10px;
       box-shadow: var(--shadow-img);
     }
+    .photo-surface--orig{ display:flex; justify-content:center; align-items:center; }
 
     /* Images */
-    .scanner-container{position:relative; display:none}
     .overlay-container{position:relative; display:none}
     .preview{width:100%; max-width:100%; height:auto; border-radius:10px; border:1px solid var(--line)}
-    .preview-small{width:100%; max-width:100%; height:auto; border-radius:10px; border:1px solid var(--line)}
-    .scanner, .overlay-scanner{
+    /* Original photo fixed to 25% width */
+    .preview-small{
+      width:25%; max-width:25%; min-width:120px;
+      height:auto; border-radius:10px; border:1px solid var(--line);
+    }
+    .overlay-scanner{
       position:absolute; top:0; left:0; right:0; height:20%;
       background:linear-gradient(to bottom, rgba(255,187,68,.55), rgba(255,187,68,0));
       border-radius:10px; display:none; animation:scanMove 3s linear infinite;
       box-shadow: 0 0 0 2px rgba(255,187,68,.35) inset, 0 8px 20px rgba(255,187,68,.25);
     }
     @keyframes scanMove{0%{top:0;}100%{top:100%;}}
-    @media (prefers-reduced-motion: reduce){ .scanner,.overlay-scanner{animation:none} .bar-fill{transition:none} }
+    @media (prefers-reduced-motion: reduce){ .overlay-scanner{animation:none} .bar-fill{transition:none} }
 
     /* Results (read-only) */
     .kv{display:grid; grid-template-columns: 1fr; gap:6px; padding:10px 0; border-bottom:1px dashed #e4edf7}
@@ -134,24 +173,20 @@
     .v{font-family:ui-monospace,Menlo,Consolas,monospace; color:#1b3d62; word-break:break-word}
     @media (min-width: 600px){ .kv{grid-template-columns: 200px 1fr} }
 
-    .status{font-size:clamp(12px,2vw,13px); margin-top:8px}
-    .ok{color:var(--ok)} .warn{color:var(--warn)} .err{color:var(--err)}
-    .countdown{font-weight:700; color:#0b5aa3}
-
-    /* Footer */
     .footer{margin-top:16px; background:var(--mcgm-blue-dark); color:#e9f2fb; border-top:3px solid var(--mcgm-orange)}
     .footer-inner{max-width:1180px; margin:0 auto; padding:14px; font-size:clamp(12px,2vw,13px); text-align:center}
     .footer-inner a{color:#ffd166; font-weight:600}
 
-    /* Modal (Outside boundary) */
-    .modal-backdrop{position:fixed; inset:0; background:rgba(0,0,0,.35); display:none; align-items:center; justify-content:center; z-index:9999}
-    .modal{background:#fff; color:#1b2b3c; border-radius:12px; max-width:520px; width:min(92%, 520px); box-shadow:0 20px 60px rgba(0,0,0,.2); border:1px solid #e5eef7}
-    .modal .m-hdr{padding:14px 16px; border-bottom:1px solid #eef3f9; font-weight:700; color:#b42318}
+    /* Modals */
+    .modal-backdrop{position:fixed; inset:0; background:rgba(0,0,0,.35); display:none; align-items:center; justify-content:center; z-index:2000}
+    .modal{background:#fff; color:#1b2b3c; border-radius:12px; max-width:560px; width:min(92%, 560px); box-shadow:0 20px 60px rgba(0,0,0,.2); border:1px solid #e5eef7}
+    .modal .m-hdr{padding:14px 16px; border-bottom:1px solid #eef3f9; font-weight:700}
     .modal .m-body{padding:14px 16px; font-size:clamp(13px,2.2vw,14px)}
     .modal .m-actions{padding:12px 16px; border-top:1px solid #eef3f9; display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap}
     .btn{padding:10px 14px; border-radius:8px; border:1px solid #cfe0f3; background:#f7fbff; color:#0c3963; cursor:pointer; font-weight:600}
     .btn-danger{background:#ffe2e0; border-color:#f3b3ad; color:#8a1c13}
     .btn-primary{background:var(--mcgm-orange); border-color:var(--mcgm-orange); color:#422306}
+    .m-err{color:#b42318}
   </style>
 
   <!-- OCR + Geo -->
@@ -160,16 +195,38 @@
 </head>
 <body>
 
-  <!-- HEADER -->
-  <div class="topbar">
-    <div class="topbar-inner">
-      <img src="https://www.mcgm.gov.in/com.mcgm.newframework/images/logo_V1.png" alt="BMC/MCGM" />
-      <div>
-        <div class="brand-title">Municipal Corporation of Greater Mumbai</div>
-        <div class="brand-sub">Abandoned Vehicles – Identification & Pre-Notice (Marshal Upload)</div>
+  <!-- MASTHEAD (sticky): Header + Progress strip -->
+  <div class="masthead">
+    <div class="topbar">
+      <div class="topbar-inner">
+        <img src="https://www.mcgm.gov.in/com.mcgm.newframework/images/logo_V1.png" alt="BMC/MCGM" />
+        <div>
+          <div class="brand-title">Municipal Corporation of Greater Mumbai</div>
+          <div class="brand-sub">Abandoned Vehicles – Identification & Pre-Notice (Marshal Upload)</div>
+        </div>
+        <div class="header-actions">
+          <button id="btnReset" class="btn-reset" title="Clear data & restart">Reset</button>
+        </div>
       </div>
-      <div class="header-actions">
-        <button id="btnReset" class="btn-reset" title="Clear data & restart">Reset</button>
+    </div>
+
+    <!-- PROGRESS (chips + bar + status + times) -->
+    <div class="progress-strip">
+      <div class="progress-inner">
+        <div class="milestones" id="milestones">
+          <div class="chip pending" id="ms1"><span class="ico"></span><span>Upload</span></div>
+          <div class="chip pending" id="ms2"><span class="ico"></span><span>OCR</span></div>
+          <div class="chip pending" id="ms3"><span class="ico"></span><span>Parse</span></div>
+          <div class="chip pending" id="ms4"><span class="ico"></span><span>GeoJSON</span></div>
+          <div class="chip pending" id="ms5"><span class="ico"></span><span>Review</span></div>
+          <div class="chip pending" id="ms6"><span class="ico"></span><span>Redirect</span></div>
+        </div>
+        <div class="bar"><div id="bar" class="bar-fill"></div></div>
+        <div class="strip-row">
+          <div id="status" class="status">Awaiting upload…</div>
+          <div id="redirectNote" class="status" style="display:none"></div>
+        </div>
+        <div id="stageTimes" class="stage-times">Upload — 0.0s • OCR — 0.0s • Parse — 0.0s • GeoJSON — 0.0s • Review — 0.0s • Redirect — 0.0s</div>
       </div>
     </div>
   </div>
@@ -200,11 +257,11 @@
           </div>
         </div>
 
-        <!-- Original image (small) -->
+        <!-- Original image (25%) -->
         <div id="originalCard" class="card" style="display:none">
-          <div class="hdr"><div class="title">Original Photo</div></div>
+          <div class="hdr"><div class="title">Original Photo (25%)</div></div>
           <div class="body">
-            <div class="photo-surface">
+            <div class="photo-surface photo-surface--orig">
               <img id="originalImg" class="preview-small" alt="original photo preview"/>
             </div>
           </div>
@@ -222,33 +279,11 @@
         </div>
       </div>
 
-      <!-- Progress column (sticky) -->
-      <div class="col-progress">
-        <div class="card sticky">
-          <div class="hdr"><div class="title">Progress</div></div>
-          <div class="body">
-            <div class="milestones">
-              <div class="chip" id="ms1"><span class="dot"></span>Upload</div>
-              <div class="chip" id="ms2"><span class="dot"></span>OCR</div>
-              <div class="chip" id="ms3"><span class="dot"></span>Parse</div>
-              <div class="chip" id="ms4"><span class="dot"></span>GeoJSON</div>
-              <div class="chip" id="ms5"><span class="dot"></span>Review</div>
-              <div class="chip" id="ms6"><span class="dot"></span>Redirect</div>
-            </div>
-            <div class="bar"><div id="bar" class="bar-fill"></div></div>
-            <div id="status" class="status">Awaiting upload…</div>
-            <div id="redirectNote" class="status" style="display:none"></div>
-          </div>
-        </div>
-      </div>
-
       <!-- Results column -->
       <div class="col-results">
         <div class="card">
           <div class="hdr"><div class="title">Results</div></div>
-          <div class="body" id="results">
-            <!-- filled incrementally -->
-          </div>
+          <div class="body" id="results"></div>
         </div>
       </div>
     </div>
@@ -265,13 +300,27 @@
   <!-- MODAL: Outside boundary -->
   <div id="modalBackdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
     <div class="modal">
-      <div class="m-hdr" id="modalTitle">Outside MCGM Boundaries — Not allowed</div>
-      <div class="m-body">
-        The detected coordinates are not inside MCGM ward polygons. You cannot submit this entry.
-      </div>
+      <div class="m-hdr m-err" id="modalTitle">Outside MCGM Boundaries — Not allowed</div>
+      <div class="m-body">The detected coordinates are not inside MCGM ward polygons. You cannot submit this entry.</div>
       <div class="m-actions">
         <button id="modalCancel" class="btn">Cancel</button>
         <button id="modalReset" class="btn btn-danger">Reset Session</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Stage Timeout -->
+  <div id="timeoutBackdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="timeoutTitle">
+    <div class="modal">
+      <div class="m-hdr m-err" id="timeoutTitle">Stage Timed Out</div>
+      <div class="m-body" id="timeoutBody">
+        A stage exceeded the maximum allowed time.<br/>
+        <strong>Reason:</strong> Network slowness, large image, or blocked resources.<br/><br/>
+        <strong>Admin:</strong> Huzefa Fakhruddin — <a href="mailto:ptradingmumbai@gmail.com">ptradingmumbai@gmail.com</a>
+      </div>
+      <div class="m-actions">
+        <button id="timeoutRetry" class="btn btn-primary">Retry</button>
+        <button id="timeoutClose" class="btn">Close</button>
       </div>
     </div>
   </div>
@@ -292,7 +341,11 @@ const GEOJSON_WARDS_URL  = "./data/wards.geojson";
 const GEOJSON_BEATS_URL  = "./data/beats.geojson";
 const GEOJSON_POLICE_URL = "./data/police_jurisdiction.geojson";
 
-/* ========= Elements & State ========= */
+/* ========= Stage timings & limits ========= */
+const STAGE_NAMES = ["Upload","OCR","Parse","GeoJSON","Review","Redirect"];
+// Limits per stage (ms)
+const STAGE_LIMITS = [20000, 90000, 10000, 15000, 45000, 20000];
+
 const els = {
   dropCard: document.getElementById('dropCard'),
   drop: document.getElementById('drop'),
@@ -311,12 +364,21 @@ const els = {
   bar: document.getElementById('bar'),
   results: document.getElementById('results'),
   redirectNote: document.getElementById('redirectNote'),
-  ms:[document.getElementById('ms1'),document.getElementById('ms2'),document.getElementById('ms3'),
-      document.getElementById('ms4'),document.getElementById('ms5'),document.getElementById('ms6')],
+  ms: [
+    document.getElementById('ms1'),document.getElementById('ms2'),document.getElementById('ms3'),
+    document.getElementById('ms4'),document.getElementById('ms5'),document.getElementById('ms6')
+  ],
+  stageTimes: document.getElementById('stageTimes'),
   modalBackdrop: document.getElementById('modalBackdrop'),
   modalCancel: document.getElementById('modalCancel'),
-  modalReset: document.getElementById('modalReset')
+  modalReset: document.getElementById('modalReset'),
+  timeoutBackdrop: document.getElementById('timeoutBackdrop'),
+  timeoutTitle: document.getElementById('timeoutTitle'),
+  timeoutBody: document.getElementById('timeoutBody'),
+  timeoutRetry: document.getElementById('timeoutRetry'),
+  timeoutClose: document.getElementById('timeoutClose'),
 };
+
 const state = {
   activeRun: 0,
   croppedUrl: "",
@@ -324,18 +386,16 @@ const state = {
   gj: { wards:null, beats:null, police:null },
   countdownTimer: null,
   countdownLeft: 0,
-  outside: false
+  outside: false,
+  // timing
+  stageStart: Array(6).fill(null),
+  stageElapsed: Array(6).fill(0),
+  stageTimeouts: Array(6).fill(null),
+  stageTicker: null,
+  timedOut: false
 };
 
-/* ========= UI helpers ========= */
-function mark(step){
-  els.ms.forEach((chip,i)=>{
-    chip.classList.remove('active','done');
-    if(i < step-1) chip.classList.add('done');
-    if(i === step-1) chip.classList.add('active');
-  });
-  els.bar.style.width = ((step-1)/5*100)+'%';
-}
+/* ========= UI Helpers ========= */
 function setStatus(msg, cls){ els.status.className = 'status ' + (cls||''); els.status.textContent = msg; }
 function kvRow(id, label, value){
   let row = document.getElementById(id);
@@ -372,18 +432,90 @@ function buildPrefillURL(){
   });
   return `https://docs.google.com/forms/d/e/${FORM_ID}/viewform?${p.toString()}`;
 }
+
+/* ========= Stage visuals ========= */
+function applyChipClasses(activeIndex){
+  els.ms.forEach((chip,i)=>{
+    chip.classList.remove('pending','active','done');
+    if(i < activeIndex) chip.classList.add('done');
+    else if(i === activeIndex) chip.classList.add('active');
+    else chip.classList.add('pending');
+  });
+  const fillPct = Math.max(0, Math.min(100, (activeIndex/5)*100));
+  els.bar.style.width = fillPct + '%';
+}
+function fmt(ms){
+  if(ms<=0 || !isFinite(ms)) return '0.0s';
+  return (ms/1000).toFixed(1)+'s';
+}
+function updateStageTimes(){
+  const parts = STAGE_NAMES.map((name,i)=>{
+    const running = state.stageStart[i] !== null && (i === currentStageIndex());
+    const v = running ? (Date.now() - state.stageStart[i]) : state.stageElapsed[i];
+    return `${name} — ${fmt(v)}`;
+  });
+  els.stageTimes.textContent = parts.join(' • ');
+}
+function currentStageIndex(){
+  for(let i=0;i<6;i++){
+    if(state.stageStart[i] !== null && state.stageElapsed[i] === 0) return i;
+  }
+  // none running; return last completed or 0
+  for(let i=5;i>=0;i--) if(state.stageElapsed[i]>0) return Math.min(i+1,5);
+  return 0;
+}
+
+/* ========= Stage control ========= */
+function startStage(i){
+  if(state.timedOut) return;
+  // end any previous running stage defensively
+  for(let k=0;k<i;k++){
+    if(state.stageStart[k]!==null && state.stageElapsed[k]===0){
+      endStage(k);
+    }
+  }
+  state.stageStart[i] = Date.now();
+  applyChipClasses(i);
+  if(!state.stageTicker){
+    state.stageTicker = setInterval(updateStageTimes, 200);
+  }
+  // start limit timer
+  clearTimeout(state.stageTimeouts[i]);
+  state.stageTimeouts[i] = setTimeout(()=>onStageTimeout(i), STAGE_LIMITS[i]);
+}
+function endStage(i){
+  if(state.stageStart[i]!==null && state.stageElapsed[i]===0){
+    state.stageElapsed[i] = Date.now() - state.stageStart[i];
+  }
+  clearTimeout(state.stageTimeouts[i]);
+  updateStageTimes();
+}
+function onStageTimeout(i){
+  if(state.stageElapsed[i]>0 || state.timedOut) return; // already finished or already timed out
+  state.timedOut = true;
+  const name = STAGE_NAMES[i];
+  const limit = (STAGE_LIMITS[i]/1000).toFixed(0)+'s';
+  els.timeoutTitle.textContent = `Stage Timed Out — ${name}`;
+  els.timeoutBody.innerHTML = `
+    The <strong>${name}</strong> stage exceeded the maximum allowed time of <strong>${limit}</strong>.<br/><br/>
+    <strong>Reason (typical):</strong> network slowness, large/corrupted image, or blocked resources (CDN).<br/><br/>
+    <strong>Admin:</strong> Huzefa Fakhruddin — <a href="mailto:ptradingmumbai@gmail.com">ptradingmumbai@gmail.com</a>
+  `;
+  els.timeoutBackdrop.style.display = 'flex';
+}
+
+/* ========= Redirect handling ========= */
 function startRedirectCountdown(sec){
   clearInterval(state.countdownTimer);
   els.redirectNote.style.display = 'block';
-  state.countdownLeft = sec;
-  els.redirectNote.innerHTML = `All set. Redirecting to Google Form in <span class="countdown">${sec}s</span>… <a href="#" id="cancelRedirect">Cancel</a>`;
+  let left = sec;
+  els.redirectNote.innerHTML = `All set. Redirecting to Google Form in <span class="countdown">${left}s</span>… <a href="#" id="cancelRedirect">Cancel</a>`;
   state.countdownTimer = setInterval(()=>{
-    state.countdownLeft -= 1;
+    left -= 1;
     const span = els.redirectNote.querySelector('.countdown');
-    if(span) span.textContent = state.countdownLeft + 's';
-    if(state.countdownLeft <= 0){
+    if(span) span.textContent = left + 's';
+    if(left <= 0){
       clearInterval(state.countdownTimer);
-      mark(6); setStatus("Redirecting to Google Form…", "ok");
       window.location.href = buildPrefillURL();
     }
   },1000);
@@ -397,11 +529,11 @@ function startRedirectCountdown(sec){
   };
 }
 
-/* ========= Modal helpers ========= */
+/* ========= Modals ========= */
 function showOutsideModal(){ els.modalBackdrop.style.display = 'flex'; }
 function hideOutsideModal(){ els.modalBackdrop.style.display = 'none'; }
 
-/* ========= FAST OCR: crop bottom overlay for speed ========= */
+/* ========= FAST OCR: crop bottom overlay ========= */
 async function cropOverlay(dataURL) {
   const blob = await (await fetch(dataURL)).blob();
   const bmp = await createImageBitmap(blob);
@@ -464,7 +596,7 @@ function lookup(lat, lon){
   };
 }
 
-/* ========= Pipeline (auto start on upload, concurrency-safe) ========= */
+/* ========= Pipeline ========= */
 async function runPipeline(file){
   const myRun = ++state.activeRun;
 
@@ -474,66 +606,149 @@ async function runPipeline(file){
   els.overlayCard.style.display  = 'block';
   els.overlayWrap.style.display  = 'block';
 
+  // Stage 1: Upload
+  startStage(0);
+  setStatus("Image loading…", "ok");
+
   const reader = new FileReader();
   reader.onload = async () => {
     if(myRun !== state.activeRun) return;
     const dataUrl = reader.result;
 
-    // Show original photo (small)
+    // Original photo (25%)
     els.originalImg.src = dataUrl;
 
-    mark(1); setStatus("Image loaded. Starting OCR…", "ok");
-
-    // Build cropped overlay once → show + animate scanner
-    state.croppedUrl = await cropOverlay(dataUrl);
+    // Prepare cropped overlay
+    setStatus("Optimising image…", "warn");
+    const cropped = await cropOverlay(dataUrl);
     if(myRun !== state.activeRun) return;
+
+    // End Upload
+    endStage(0);
+
+    // Stage 2: OCR
+    startStage(1);
+    setStatus("Running OCR…", "warn");
+    state.croppedUrl = cropped;
     els.overlayImg.src = state.croppedUrl;
-    els.overlayScanner.style.display = "block";  // start scanner on cropped view
+    els.overlayScanner.style.display = "block";
 
-    // OCR on cropped
-    mark(2); setStatus("Running OCR…", "warn");
-    const worker = await Tesseract.createWorker('eng');
-    await worker.setParameters({
-      tessedit_char_whitelist: "0123456789:/.-,+() APMapm°'\"IndiaMaharashtraMumbaiAndheriVersovaRoadRdWestEastNorthSouth",
-      tessedit_pageseg_mode: 6, user_defined_dpi: "200"
-    });
-    const { data: { text } } = await worker.recognize(
-      state.croppedUrl,
-      { logger: m => { if(m.status && myRun===state.activeRun) setStatus(`OCR: ${m.status} ${Math.round((m.progress||0)*100)}%`,"warn"); } }
-    );
-    await worker.terminate();
-    if(myRun !== state.activeRun) return;
-    els.overlayScanner.style.display = "none"; // stop scanner
+    try {
+      const worker = await Tesseract.createWorker({
+        workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+        corePath:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1',
+        langPath:   'https://cdn.jsdelivr.net/npm/@tesseract.js-data',
+        logger: m => { if (m?.status && myRun===state.activeRun) {
+          const pct = Math.round((m.progress || 0) * 100);
+          setStatus(`OCR: ${m.status} ${pct}%`, "warn");
+        }}
+      });
+      await worker.loadLanguage('eng');
+      await worker.initialize('eng');
+      await worker.setParameters({
+        tessedit_pageseg_mode: 6,
+        tessedit_char_whitelist:
+          "0123456789:/.-,+() APMapm°'\"IndiaMaharashtraMumbaiAndheriVersovaRoadRdWestEastNorthSouth",
+        user_defined_dpi: "200"
+      });
 
-    // Parse → render immediately
-    mark(3); setStatus("Parsing extracted text…", "warn");
-    Object.assign(state.data, parseAll(text));
-    renderIncremental();
+      const { data: { text } } = await worker.recognize(state.croppedUrl);
+      await worker.terminate();
+      els.overlayScanner.style.display = "none";
 
-    // GeoJSON lookup
-    mark(4); setStatus("GeoJSON lookup…", "warn");
-    let g = {WARD:"",BEAT_NO:"",PS_NAME:""};
-    state.outside = false;
-    if(state.data.lat && state.data.lon){
-      g = lookup(state.data.lat, state.data.lon);
-      Object.assign(state.data, {WARD:g.WARD, BEAT_NO:g.BEAT_NO, PS_NAME:g.PS_NAME});
+      // End OCR
+      endStage(1);
+
+      // Stage 3: Parse
+      startStage(2);
+      setStatus("Parsing extracted text…", "warn");
+      Object.assign(state.data, parseAll(text));
       renderIncremental();
-      if(!g.WARD){ state.outside = true; }
-    } else {
-      state.outside = true;
-    }
+      endStage(2);
 
-    if(state.outside){
-      clearInterval(state.countdownTimer);
-      mark(5);
-      setStatus("Outside MCGM Boundaries — Not allowed.", "err");
-      showOutsideModal();
-      return;
-    }
+      // Stage 4: GeoJSON
+      startStage(3);
+      setStatus("GeoJSON lookup…", "warn");
+      let g = {WARD:"",BEAT_NO:"",PS_NAME:""};
+      state.outside = false;
+      if(state.data.lat && state.data.lon){
+        g = lookup(state.data.lat, state.data.lon);
+        Object.assign(state.data, {WARD:g.WARD, BEAT_NO:g.BEAT_NO, PS_NAME:g.PS_NAME});
+        renderIncremental();
+        if(!g.WARD){ state.outside = true; }
+      } else { state.outside = true; }
+      endStage(3);
 
-    // All good → Review → auto redirect
-    mark(5); setStatus("Ready. Review the results.", "ok");
-    startRedirectCountdown(5);
+      // Outside?
+      if(state.outside){
+        setStatus("Outside MCGM Boundaries — Not allowed.", "err");
+        showOutsideModal();
+        return;
+      }
+
+      // Stage 5: Review
+      startStage(4);
+      setStatus("Ready. Review the results.", "ok");
+      // Immediately cue redirect → end Review, start Redirect
+      endStage(4);
+
+      // Stage 6: Redirect
+      startStage(5);
+      startRedirectCountdown(5);
+
+    } catch (e) {
+      console.error("Worker OCR failed. Trying fallback:", e);
+      els.overlayScanner.style.display = "none";
+
+      // End OCR if it was running too long? We'll end it only after fallback success.
+      // Fallback: single-threaded recognize
+      try {
+        const { data: { text } } = await Tesseract.recognize(
+          state.croppedUrl, 'eng',
+          {
+            corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1',
+            langPath: 'https://cdn.jsdelivr.net/npm/@tesseract.js-data',
+            logger: m => { if (m?.status) setStatus(`OCR (fallback): ${m.status} ${Math.round((m.progress||0)*100)}%`, "warn"); }
+          }
+        );
+        endStage(1); // finish OCR after fallback
+
+        startStage(2);
+        setStatus("Parsing extracted text…", "warn");
+        Object.assign(state.data, parseAll(text));
+        renderIncremental();
+        endStage(2);
+
+        startStage(3);
+        setStatus("GeoJSON lookup…", "warn");
+        let g = {WARD:"",BEAT_NO:"",PS_NAME:""};
+        state.outside = false;
+        if(state.data.lat && state.data.lon){
+          g = lookup(state.data.lat, state.data.lon);
+          Object.assign(state.data, {WARD:g.WARD, BEAT_NO:g.BEAT_NO, PS_NAME:g.PS_NAME});
+          renderIncremental();
+          if(!g.WARD){ state.outside = true; }
+        } else { state.outside = true; }
+        endStage(3);
+
+        if(state.outside){
+          setStatus("Outside MCGM Boundaries — Not allowed.", "err");
+          showOutsideModal(); return;
+        }
+
+        startStage(4);
+        setStatus("Ready. Review the results.", "ok");
+        endStage(4);
+
+        startStage(5);
+        startRedirectCountdown(5);
+
+      } catch (e2) {
+        console.error("Fallback OCR failed:", e2);
+        setStatus("OCR could not complete. Tap Retry.", "err");
+        onStageTimeout(1); // surface timeout-like modal for assistance
+      }
+    }
   };
   reader.readAsDataURL(file);
 }
@@ -545,17 +760,19 @@ els.drop.addEventListener('dragleave', ()=>{ els.drop.style.borderColor="#cfe0f3
 els.drop.addEventListener('drop', e=>{
   e.preventDefault(); els.drop.style.borderColor="#cfe0f3";
   const f = e.dataTransfer.files?.[0]; if(!f) return;
-  runPipeline(f); // auto-start
+  runPipeline(f);
 });
 els.file.addEventListener('change', e=>{
   const f = e.target.files?.[0]; if(!f) return;
-  runPipeline(f); // auto-start
+  runPipeline(f);
 });
 
-/* ========= Reset (clear storage/caches/cookies) ========= */
+/* ========= Reset ========= */
 async function hardReset(){
   try{
     clearInterval(state.countdownTimer);
+    clearInterval(state.stageTicker);
+    state.stageTicker = null;
     localStorage.clear(); sessionStorage.clear();
     if ('caches' in window) {
       const keys = await caches.keys();
@@ -575,9 +792,12 @@ async function hardReset(){
 }
 els.btnReset.addEventListener('click', hardReset);
 
-/* Modal actions */
-els.modalCancel.addEventListener('click', ()=>{ hideOutsideModal(); });
-els.modalReset.addEventListener('click', ()=>{ hideOutsideModal(); hardReset(); });
+/* Modals */
+els.modalCancel.addEventListener('click', ()=>{ els.modalBackdrop.style.display='none'; });
+els.modalReset.addEventListener('click', ()=>{ els.modalBackdrop.style.display='none'; hardReset(); });
+
+els.timeoutRetry.addEventListener('click', ()=>{ els.timeoutBackdrop.style.display='none'; hardReset(); });
+els.timeoutClose.addEventListener('click', ()=>{ els.timeoutBackdrop.style.display='none'; });
 
 /* ========= Bootstrap ========= */
 (async ()=>{
@@ -588,8 +808,8 @@ els.modalReset.addEventListener('click', ()=>{ hideOutsideModal(); hardReset(); 
     console.error(e);
     setStatus("Could not load GeoJSON (check /data paths / CORS).", "err");
   }
-  renderIncremental(); // placeholders visible even on mobile
-  mark(1);
+  // seed initial times row
+  updateStageTimes();
 })();
 </script>
 </body>
