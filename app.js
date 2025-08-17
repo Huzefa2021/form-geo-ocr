@@ -1,6 +1,6 @@
 /* =========================================================
    MCGM – Marshal Upload Portal : Application Script (app.js)
-   Build: v2025.08.17.Prod.v7
+   Build: v2025.08.17.Prod.v8 (OCR mode toggle)
    ========================================================= */
 
 /* ---------- Tiny DOM util ---------- */
@@ -30,11 +30,17 @@ const ENTRY={
   address:"entry.1188611077", police:"entry.1555105834"
 };
 const STAGE_LIMITS=[20000,90000,12000,15000,45000,20000];
-const BUILD="v2025.08.17.Prod.v7";
+const BUILD="v2025.08.17.Prod.v8";
 const MUMBAI_BBOX=[72.60,18.80,73.20,19.50];
+
+/* ---------- OCR Mode (feature flag) ---------- */
+const OCR_MODE_KEY="ocrLangMode"; // 'auto' | 'eng' | 'indic'
+function getOCRMode(){ return localStorage.getItem(OCR_MODE_KEY) || "auto"; }
+function setOCRMode(v){ localStorage.setItem(OCR_MODE_KEY, v); }
 
 /* ---------- Elements ---------- */
 const els={
+  ocrMode:$("#ocrMode"),
   dropCard:$("#dropCard"), drop:$("#drop"), file:$("#file"),
   originalCard:$("#originalCard"), originalImg:$("#originalImg"),
   overlayCard:$("#overlayCard"), overlayWrap:$("#overlayWrap"),
@@ -159,7 +165,7 @@ function enhanceWithCV(canvas){
     const m1 = cv.mean(bin1)[0], m2 = cv.mean(bin2)[0];
     let best = m1>=m2 ? bin1 : bin2;
 
-    // Ensure white background using MEDIAN ( steadier than mean )
+    // Ensure white background using MEDIAN
     const hist = new cv.Mat();
     cv.calcHist([best], [0], new cv.Mat(), hist, [256], [0,256]);
     let cum=0, medianIdx=0, total=cv.countNonZero(best);
@@ -230,7 +236,7 @@ function looksUsefulSeg(s){
   const t=s.trim();
   if(!t) return false;
   if(/^(?:joey|wind|humidity|pressure|temperature)\b/i.test(t)) return false;
-  if(/^\d{8,}$/.test(t)) return false;                 // NEW: drop long numeric counters
+  if(/^\d{8,}$/.test(t)) return false;                 // drop long numeric counters
   if(/^(?:[A-Za-z]\s+){3,}$/.test(t)) return false;
   return true;
 }
@@ -343,27 +349,33 @@ function parseAll(text){
   return { lat, lon, address, date, time };
 }
 
-/* ---------- OCR with dynamic language ---------- */
+/* ---------- OCR with mode toggle ---------- */
 async function ensureV4(){
   if(!window.Tesseract?.recognize){
     await addScript("https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js");
   }
 }
 async function ocrRecognize(url){
-  // quick prepass on downscaled strip (fast)
+  const mode=getOCRMode(); // 'auto' | 'eng' | 'indic'
   let langHint="eng";
-  try{
-    const bmp=await createImageBitmap(await (await fetch(url)).blob());
-    const c=document.createElement("canvas");
-    c.width=Math.max(1,Math.floor(bmp.width*0.3));
-    c.height=Math.max(1,Math.floor(bmp.height*0.3));
-    c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);
-    const strip=c.toDataURL("image/png");
+
+  if(mode==="indic"){ langHint="eng+hin+mar"; }
+  else if(mode==="auto"){
+    // quick prepass on downscaled strip
     try{
-      const probe=await Tesseract.recognize(strip,"eng",{ tessedit_pageseg_mode:6, preserve_interword_spaces:1 });
-      if(/[\u0900-\u097F]/.test(probe?.data?.text||"")) langHint="eng+hin+mar";
+      const bmp=await createImageBitmap(await (await fetch(url)).blob());
+      const c=document.createElement("canvas");
+      c.width=Math.max(1,Math.floor(bmp.width*0.3));
+      c.height=Math.max(1,Math.floor(bmp.height*0.3));
+      c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);
+      const strip=c.toDataURL("image/png");
+      try{
+        const probe=await Tesseract.recognize(strip,"eng",{ tessedit_pageseg_mode:6, preserve_interword_spaces:1 });
+        if(/[\u0900-\u097F]/.test(probe?.data?.text||"")) langHint="eng+hin+mar";
+      }catch{}
     }catch{}
-  }catch{}
+  } // else ENG only
+
   try{
     const {data:{text}}=await Tesseract.recognize(url,langHint);
     return text;
@@ -377,7 +389,7 @@ async function ocrRecognize(url){
 /* ---------- Redirect ---------- */
 function startRedirectCountdown(sec){
   clearInterval(state.countdownTimer);
-  els.redirectNote.style.display="block";
+  els.redirectNote.classList.remove("hidden");
   let left=sec;
   els.redirectNote.innerHTML=`All set. Redirecting to Google Form in <span class="countdown">${left}s</span>… <a href="#" id="cancelRedirect">Cancel</a>`;
   state.countdownTimer=setInterval(()=>{ left-=1; const span=document.querySelector(".countdown"); if(span) span.textContent=left+"s"; if(left<=0){ clearInterval(state.countdownTimer); window.location.href=buildPrefillURL(); } },1000);
@@ -396,12 +408,22 @@ function bindDropzone(){
   dz.addEventListener("drop",(e)=>{ e.preventDefault(); dz.style.borderColor="#cfe0f3"; const f=e.dataTransfer?.files?.[0]; if(!f) return; if(!isAllowedImage(f)){ showModal("Unsupported file","Only image files (JPG, PNG, WEBP, HEIC/HEIF) are allowed."); return; } runPipeline(f); });
   fi.addEventListener("change",(e)=>{ const f=e.target.files?.[0]; if(!f) return; if(!isAllowedImage(f)){ showModal("Unsupported file","Only image files (JPG, PNG, WEBP, HEIC/HEIF) are allowed."); fi.value=""; return; } const tok=tokenOf(f); if(state.lastPickToken===tok) return; state.lastPickToken=tok; runPipeline(f); });
   $("#btnReset").onclick=()=>location.reload();
+
+  // OCR mode init & change
+  els.ocrMode.value=getOCRMode();
+  els.ocrMode.addEventListener("change",()=>{
+    setOCRMode(els.ocrMode.value);
+    setStatus(`OCR Mode: ${els.ocrMode.value.toUpperCase()}`,"ok");
+  });
 }
 
 /* ---------- Pipeline ---------- */
 async function runPipeline(file){
   const myRun=++state.activeRun;
-  els.dropCard.style.display="none"; els.originalCard.style.display="block"; els.overlayCard.style.display="block"; els.overlayWrap.style.display="flex";
+  els.dropCard.classList.add("hidden");
+  els.originalCard.classList.remove("hidden");
+  els.overlayCard.classList.remove("hidden");
+  $("#resultsNote")?.remove();
 
   startStage(0); setStatus("Image loading…","ok");
   const reader=new FileReader();
@@ -410,7 +432,7 @@ async function runPipeline(file){
     const dataUrl=reader.result; els.originalImg.src=dataUrl;
 
     setStatus("Optimising image…","warn");
-    const crop = await cropOverlay(dataUrl);   // {displayUrl, ocrUrl}
+    const crop = await cropOverlay(dataUrl);
     if(myRun!==state.activeRun) return;
     endStage(0);
 
@@ -423,7 +445,6 @@ async function runPipeline(file){
     els.overlayScanner.style.display="none"; endStage(1);
 
     startStage(2); setStatus("Parsing extracted text…","warn");
-    $("#resultsNote")?.remove();
     Object.assign(state.data, parseAll(text));
     render(); endStage(2);
 
