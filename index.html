@@ -3,132 +3,158 @@
 <head>
   <meta charset="utf-8" />
   <title>MCGM | Abandoned Vehicles – Marshal Upload Portal</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 
-  <!-- Fonts: Roboto (Latin) + Noto Sans Devanagari (Indic scripts) -->
+  <!-- Fonts: Roboto + Noto Sans Devanagari (MCGM-like) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Noto+Sans+Devanagari:wght@400;500;700&display=swap" rel="stylesheet">
 
   <style>
     :root{
-      --mcgm-blue:#0b5aa3;
-      --mcgm-blue-dark:#0a4a87;
-      --mcgm-orange:#ff9933;
-      --bg:#f5f7fb;
-      --fg:#0d2438;
-      --muted:#5b6b7a;
-      --line:#dde6f1;
-      --card:#ffffff;
-      --ok:#198754; --warn:#f59e0b; --err:#dc3545;
-      --accent:#0b5aa3;
+      --mcgm-blue:#0b5aa3; --mcgm-blue-dark:#0a4a87; --mcgm-orange:#ff9933;
+      --bg:#f5f7fb; --fg:#0d2438; --muted:#5b6b7a; --line:#dde6f1; --card:#ffffff;
+      --ok:#198754; --warn:#f59e0b; --err:#dc3545; --accent:#0b5aa3;
+      --radius:14px;
+      --shadow-card: 0 6px 22px rgba(10,25,55,.10), 0 1px 0 rgba(10,25,55,.06);
+      --shadow-img:  0 10px 24px rgba(0,0,0,.12);
+      --shadow-hover:0 18px 40px rgba(16,38,74,.18);
     }
     *{box-sizing:border-box}
+    html,body{height:100%}
     body{
-      margin:0;
-      color:var(--fg);
-      background:var(--bg);
+      margin:0; color:var(--fg); background:var(--bg);
       font-family:"Roboto","Noto Sans Devanagari","Segoe UI",Arial,Helvetica,sans-serif;
       -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
+      font-size: clamp(14px, 1.8vw, 16px);
     }
     a{color:var(--mcgm-blue); text-decoration:none}
     a:hover{text-decoration:underline}
 
-    /* Header & Top Nav */
-    .topbar{
-      background:var(--mcgm-blue);
-      color:#fff;
-      border-bottom:4px solid var(--mcgm-orange);
-    }
-    .topbar-inner{
-      max-width:1180px; margin:0 auto; padding:12px 16px;
-      display:flex; align-items:center; gap:14px;
-    }
-    .topbar img{height:58px; width:auto}
-    .brand-title{font-weight:700; font-size:20px; line-height:1.2}
-    .brand-sub{font-size:13px; opacity:.9}
+    /* Header */
+    .topbar{background:var(--mcgm-blue); color:#fff; border-bottom:4px solid var(--mcgm-orange)}
+    .topbar-inner{max-width:1180px; margin:0 auto; padding:10px 16px; display:flex; align-items:center; gap:12px}
+    .topbar img{height:48px; width:auto}
+    .brand-title{font-weight:700; font-size:clamp(16px,2.6vw,20px); line-height:1.2}
+    .brand-sub{font-size:clamp(12px,2vw,14px); opacity:.9}
+    .header-actions{margin-left:auto}
+    .btn-reset{padding:8px 12px; border-radius:8px; border:1px solid #cfe0f3; background:#f7fbff; color:#0c3963; cursor:pointer; font-weight:600}
 
-    /* Breadcrumb strip (MCGM vibe) */
-    .crumbs{
-      background:#eef4fb; border-bottom:1px solid var(--line);
-    }
-    .crumbs-inner{
-      max-width:1180px; margin:0 auto; padding:8px 16px; font-size:13px; color:#43648a;
-    }
+    /* Breadcrumb */
+    .crumbs{background:#eef4fb; border-bottom:1px solid var(--line)}
+    .crumbs-inner{max-width:1180px; margin:0 auto; padding:8px 16px; font-size:clamp(12px,2vw,13px); color:#43648a}
     .crumbs-inner a{color:#2f5f9a}
 
-    /* Page container */
-    .wrap{max-width:1180px; margin:22px auto; padding:0 16px}
+    /* Container */
+    .wrap{max-width:1180px; margin:16px auto; padding:0 12px}
+
+    /* Grid layout (mobile-first single column; 2-col on >= 980px) */
+    .grid{
+      display:grid;
+      grid-template-columns: 1fr;
+      grid-template-areas:
+        "image"
+        "progress"
+        "results";
+      gap:12px;
+    }
+    @media (min-width: 980px){
+      .grid{
+        grid-template-columns: 430px 1fr;
+        grid-template-areas:
+          "image progress"
+          "image results";
+        gap:18px;
+      }
+    }
+    .col-image{grid-area:image}
+    .col-progress{grid-area:progress}
+    .col-results{grid-area:results}
 
     /* Cards */
     .card{
-      background:var(--card); border:1px solid var(--line); border-radius:12px;
-      box-shadow:0 4px 16px rgba(16,38,74,.04);
-      margin-bottom:18px;
+      background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
+      box-shadow:var(--shadow-card); transition:box-shadow .25s ease;
     }
-    .card .hdr{
-      padding:14px 16px; border-bottom:1px solid var(--line);
-      display:flex; align-items:center; gap:10px;
-    }
+    .card:hover{ box-shadow:var(--shadow-hover); }
+    .card .hdr{padding:12px 14px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:10px}
     .card .hdr .title{font-weight:700; color:#143a63}
-    .card .body{padding:16px}
+    .card .body{padding:12px}
+
+    /* Sticky progress card */
+    .sticky{ position: sticky; top: 8px; z-index: 10; }
 
     /* Milestones */
-    .milestones{display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px}
-    .chip{
-      display:inline-flex; align-items:center; gap:8px; padding:6px 10px;
-      border-radius:999px; border:1px solid var(--line); background:#f4f8ff; color:#0c3963; font-size:12.5px;
-    }
+    .milestones{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px}
+    .chip{display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; border:1px solid var(--line); background:#f4f8ff; color:#0c3963; font-size:clamp(12px,2vw,13px)}
     .chip .dot{width:8px; height:8px; border-radius:50%; background:#9ec5ff}
     .chip.active .dot{background:#ffd166}
     .chip.done .dot{background:#37b24d}
 
     /* Progress bar */
-    .bar{height:8px; border-radius:999px; background:#e9f1fb; border:1px solid var(--line); overflow:hidden}
+    .bar{height:10px; border-radius:999px; background:#e9f1fb; border:1px solid var(--line); overflow:hidden}
     .bar-fill{height:100%; width:0%; background:linear-gradient(90deg,#ffbd59,#ffd166); transition:width .35s ease}
 
-    /* Dropzone */
+    /* Dropzone (removed after upload) */
     .drop{
-      border:2px dashed #cfe0f3; border-radius:12px; min-height:140px;
-      display:grid; place-items:center; text-align:center; padding:18px; cursor:pointer; background:#fbfdff;
+      border:2px dashed #cfe0f3; border-radius:var(--radius); min-height:120px;
+      display:grid; place-items:center; text-align:center; padding:18px; cursor:pointer;
+      background:#fbfdff;
     }
     .drop:hover{border-color:#9ec5ff; background:#f6fbff}
-    .dz-title{font-weight:600; color:#133a62}
-    .dz-hint{font-size:12px; color:var(--muted)}
+    .dz-title{font-weight:600; color:#133a62; font-size:clamp(14px,2.4vw,16px)}
+    .dz-hint{font-size:clamp(12px,2vw,13px); color:#5f7896}
 
-    /* Scanner preview */
-    .scanwrap{display:none; margin-top:12px}
-    .scanner-container{position:relative; display:inline-block}
-    .preview{max-width:280px; border-radius:10px; border:1px solid var(--line)}
-    .scanner{
+    /* Photo surfaces */
+    .photo-surface{
+      background:linear-gradient(180deg,#ffffff 0%, #f7fbff 100%);
+      border:1px solid var(--line);
+      border-radius:12px; padding:10px;
+      box-shadow: var(--shadow-img);
+    }
+
+    /* Images */
+    .scanner-container{position:relative; display:none}
+    .overlay-container{position:relative; display:none}
+    .preview{width:100%; max-width:100%; height:auto; border-radius:10px; border:1px solid var(--line)}
+    .preview-small{width:100%; max-width:100%; height:auto; border-radius:10px; border:1px solid var(--line)}
+    .scanner, .overlay-scanner{
       position:absolute; top:0; left:0; right:0; height:20%;
-      background:linear-gradient(to bottom, rgba(255,187,68,.45), rgba(255,187,68,0));
+      background:linear-gradient(to bottom, rgba(255,187,68,.55), rgba(255,187,68,0));
       border-radius:10px; display:none; animation:scanMove 3s linear infinite;
+      box-shadow: 0 0 0 2px rgba(255,187,68,.35) inset, 0 8px 20px rgba(255,187,68,.25);
     }
     @keyframes scanMove{0%{top:0;}100%{top:100%;}}
+    @media (prefers-reduced-motion: reduce){ .scanner,.overlay-scanner{animation:none} .bar-fill{transition:none} }
 
     /* Results (read-only) */
-    .kv{display:grid; grid-template-columns:220px 1fr; gap:10px; align-items:center; padding:8px 0; border-bottom:1px dashed #e4edf7}
+    .kv{display:grid; grid-template-columns: 1fr; gap:6px; padding:10px 0; border-bottom:1px dashed #e4edf7}
     .kv:last-child{border-bottom:0}
-    .k{font-weight:600; color:#0f3468}
+    .k{font-weight:700; color:#0f3468}
     .v{font-family:ui-monospace,Menlo,Consolas,monospace; color:#1b3d62; word-break:break-word}
+    @media (min-width: 600px){ .kv{grid-template-columns: 200px 1fr} }
 
-    /* Buttons & status */
-    .actions{display:flex; gap:12px; flex-wrap:wrap; margin-top:12px}
-    .btn{padding:10px 14px; border-radius:8px; border:1px solid #cfe0f3; background:#f7fbff; color:#0c3963; cursor:pointer; font-weight:600}
-    .btn.primary{background:var(--mcgm-orange); border-color:var(--mcgm-orange); color:#422306}
-    .status{font-size:13px; margin-top:8px}
+    .status{font-size:clamp(12px,2vw,13px); margin-top:8px}
     .ok{color:var(--ok)} .warn{color:var(--warn)} .err{color:var(--err)}
+    .countdown{font-weight:700; color:#0b5aa3}
 
     /* Footer */
-    footer{
-      margin-top:24px; background:var(--mcgm-blue-dark); color:#e9f2fb; border-top:3px solid var(--mcgm-orange);
-    }
-    .footer-inner{max-width:1180px; margin:0 auto; padding:16px; font-size:13px; text-align:center}
+    .footer{margin-top:16px; background:var(--mcgm-blue-dark); color:#e9f2fb; border-top:3px solid var(--mcgm-orange)}
+    .footer-inner{max-width:1180px; margin:0 auto; padding:14px; font-size:clamp(12px,2vw,13px); text-align:center}
     .footer-inner a{color:#ffd166; font-weight:600}
+
+    /* Modal (Outside boundary) */
+    .modal-backdrop{position:fixed; inset:0; background:rgba(0,0,0,.35); display:none; align-items:center; justify-content:center; z-index:9999}
+    .modal{background:#fff; color:#1b2b3c; border-radius:12px; max-width:520px; width:min(92%, 520px); box-shadow:0 20px 60px rgba(0,0,0,.2); border:1px solid #e5eef7}
+    .modal .m-hdr{padding:14px 16px; border-bottom:1px solid #eef3f9; font-weight:700; color:#b42318}
+    .modal .m-body{padding:14px 16px; font-size:clamp(13px,2.2vw,14px)}
+    .modal .m-actions{padding:12px 16px; border-top:1px solid #eef3f9; display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap}
+    .btn{padding:10px 14px; border-radius:8px; border:1px solid #cfe0f3; background:#f7fbff; color:#0c3963; cursor:pointer; font-weight:600}
+    .btn-danger{background:#ffe2e0; border-color:#f3b3ad; color:#8a1c13}
+    .btn-primary{background:var(--mcgm-orange); border-color:var(--mcgm-orange); color:#422306}
   </style>
 
-  <!-- OCR + Geo libs -->
+  <!-- OCR + Geo -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.2.0/turf.min.js"></script>
 </head>
@@ -141,6 +167,9 @@
       <div>
         <div class="brand-title">Municipal Corporation of Greater Mumbai</div>
         <div class="brand-sub">Abandoned Vehicles – Identification & Pre-Notice (Marshal Upload)</div>
+      </div>
+      <div class="header-actions">
+        <button id="btnReset" class="btn-reset" title="Clear data & restart">Reset</button>
       </div>
     </div>
   </div>
@@ -155,159 +184,250 @@
 
   <!-- MAIN -->
   <div class="wrap">
-
-    <!-- Upload -->
-    <div class="card">
-      <div class="hdr"><div class="title">Upload Photo</div></div>
-      <div class="body">
-        <div id="drop" class="drop">
-          <div>
-            <div class="dz-title">Drag & Drop image</div>
-            <div class="dz-hint">or click to choose (JPG / PNG from GPS Map Camera)</div>
-          </div>
-        </div>
-        <input id="file" type="file" accept="image/*" hidden />
-        <div id="scanwrap" class="scanwrap">
-          <div class="scanner-container">
-            <img id="preview" class="preview" alt="preview"/>
-            <div id="scanner" class="scanner"></div>
+    <div class="grid">
+      <!-- Image column -->
+      <div class="col-image">
+        <div id="dropCard" class="card">
+          <div class="hdr"><div class="title">Upload Photo</div></div>
+          <div class="body">
+            <div id="drop" class="drop" role="button" aria-label="Upload image">
+              <div>
+                <div class="dz-title">Tap to choose image</div>
+                <div class="dz-hint">or drag & drop (JPG/PNG from GPS Map Camera)</div>
+              </div>
+            </div>
+            <input id="file" type="file" accept="image/*" hidden />
           </div>
         </div>
 
-        <div class="actions">
-          <button id="btnRun" class="btn">Run OCR & Geo</button>
-          <button id="btnGo" class="btn primary">Continue to Google Form</button>
+        <!-- Original image (small) -->
+        <div id="originalCard" class="card" style="display:none">
+          <div class="hdr"><div class="title">Original Photo</div></div>
+          <div class="body">
+            <div class="photo-surface">
+              <img id="originalImg" class="preview-small" alt="original photo preview"/>
+            </div>
+          </div>
         </div>
-        <div id="status" class="status">Awaiting upload…</div>
-      </div>
-    </div>
 
-    <!-- Progress -->
-    <div class="card">
-      <div class="hdr"><div class="title">Progress</div></div>
-      <div class="body">
-        <div class="milestones">
-          <div class="chip" id="ms1"><span class="dot"></span>Upload</div>
-          <div class="chip" id="ms2"><span class="dot"></span>OCR</div>
-          <div class="chip" id="ms3"><span class="dot"></span>Parse</div>
-          <div class="chip" id="ms4"><span class="dot"></span>GeoJSON</div>
-          <div class="chip" id="ms5"><span class="dot"></span>Review</div>
-          <div class="chip" id="ms6"><span class="dot"></span>Redirect</div>
+        <!-- Cropped overlay with scanner -->
+        <div id="overlayCard" class="card" style="display:none">
+          <div class="hdr"><div class="title">Cropped Overlay (GPS Text)</div></div>
+          <div class="body">
+            <div class="photo-surface overlay-container" id="overlayWrap">
+              <img id="overlayImg" class="preview" alt="cropped overlay"/>
+              <div id="overlayScanner" class="overlay-scanner"></div>
+            </div>
+          </div>
         </div>
-        <div class="bar"><div id="bar" class="bar-fill"></div></div>
       </div>
-    </div>
 
-    <!-- Results (READ-ONLY) -->
-    <div class="card">
-      <div class="hdr"><div class="title">Results</div></div>
-      <div class="body" id="results">
-        <!-- rows will be injected as read-only key/value -->
+      <!-- Progress column (sticky) -->
+      <div class="col-progress">
+        <div class="card sticky">
+          <div class="hdr"><div class="title">Progress</div></div>
+          <div class="body">
+            <div class="milestones">
+              <div class="chip" id="ms1"><span class="dot"></span>Upload</div>
+              <div class="chip" id="ms2"><span class="dot"></span>OCR</div>
+              <div class="chip" id="ms3"><span class="dot"></span>Parse</div>
+              <div class="chip" id="ms4"><span class="dot"></span>GeoJSON</div>
+              <div class="chip" id="ms5"><span class="dot"></span>Review</div>
+              <div class="chip" id="ms6"><span class="dot"></span>Redirect</div>
+            </div>
+            <div class="bar"><div id="bar" class="bar-fill"></div></div>
+            <div id="status" class="status">Awaiting upload…</div>
+            <div id="redirectNote" class="status" style="display:none"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Results column -->
+      <div class="col-results">
+        <div class="card">
+          <div class="hdr"><div class="title">Results</div></div>
+          <div class="body" id="results">
+            <!-- filled incrementally -->
+          </div>
+        </div>
       </div>
     </div>
   </div>
 
   <!-- FOOTER -->
-  <footer>
+  <div class="footer">
     <div class="footer-inner">
-      &copy; 2025 Municipal Corporation of Greater Mumbai (MCGM) • <a href="https://www.mcgm.gov.in" target="_blank" rel="noopener">www.mcgm.gov.in</a>
+      &copy; 2025 Municipal Corporation of Greater Mumbai (MCGM) •
+      <a href="https://www.mcgm.gov.in" target="_blank" rel="noopener">www.mcgm.gov.in</a>
     </div>
-  </footer>
+  </div>
+
+  <!-- MODAL: Outside boundary -->
+  <div id="modalBackdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal">
+      <div class="m-hdr" id="modalTitle">Outside MCGM Boundaries — Not allowed</div>
+      <div class="m-body">
+        The detected coordinates are not inside MCGM ward polygons. You cannot submit this entry.
+      </div>
+      <div class="m-actions">
+        <button id="modalCancel" class="btn">Cancel</button>
+        <button id="modalReset" class="btn btn-danger">Reset Session</button>
+      </div>
+    </div>
+  </div>
 
 <script>
-/* =========================
-   CONFIG: Form + GeoJSON
-   ========================= */
+/* ========= CONFIG ========= */
 const FORM_ID = "1FAIpQLSeo-xlOSxvG0IwtO5MkKaTJZNJkgTsmgZUw-FBsntFlNdRnCw";
 const ENTRY = {
-  date:    "entry.1911996449",
-  time:    "entry.1421115881",
-  lon:     "entry.113122688",  // 0
-  lat:     "entry.419288992",  // 1
-  ward:    "entry.1625337207", // 2
-  beat:    "entry.1058310891", // 3
-  address: "entry.1188611077", // 4
-  police:  "entry.1555105834"  // 5
+  date: "entry.1911996449", time: "entry.1421115881",
+  lon:  "entry.113122688",  // 0
+  lat:  "entry.419288992",  // 1
+  ward: "entry.1625337207", // 2
+  beat: "entry.1058310891", // 3
+  address:"entry.1188611077", // 4
+  police: "entry.1555105834"  // 5
 };
 const GEOJSON_WARDS_URL  = "./data/wards.geojson";
 const GEOJSON_BEATS_URL  = "./data/beats.geojson";
 const GEOJSON_POLICE_URL = "./data/police_jurisdiction.geojson";
 
-/* =========================
-   State & Elements
-   ========================= */
+/* ========= Elements & State ========= */
 const els = {
+  dropCard: document.getElementById('dropCard'),
   drop: document.getElementById('drop'),
   file: document.getElementById('file'),
-  scanwrap: document.getElementById('scanwrap'),
-  scanner: document.getElementById('scanner'),
-  preview: document.getElementById('preview'),
-  btnRun: document.getElementById('btnRun'),
-  btnGo: document.getElementById('btnGo'),
+
+  originalCard: document.getElementById('originalCard'),
+  originalImg: document.getElementById('originalImg'),
+
+  overlayCard: document.getElementById('overlayCard'),
+  overlayWrap: document.getElementById('overlayWrap'),
+  overlayImg: document.getElementById('overlayImg'),
+  overlayScanner: document.getElementById('overlayScanner'),
+
+  btnReset: document.getElementById('btnReset'),
   status: document.getElementById('status'),
   bar: document.getElementById('bar'),
   results: document.getElementById('results'),
+  redirectNote: document.getElementById('redirectNote'),
   ms:[document.getElementById('ms1'),document.getElementById('ms2'),document.getElementById('ms3'),
-      document.getElementById('ms4'),document.getElementById('ms5'),document.getElementById('ms6')]
+      document.getElementById('ms4'),document.getElementById('ms5'),document.getElementById('ms6')],
+  modalBackdrop: document.getElementById('modalBackdrop'),
+  modalCancel: document.getElementById('modalCancel'),
+  modalReset: document.getElementById('modalReset')
 };
-let currentFile = null;
-let ocrText = "";
-let data = { date:"", time:"", lat:"", lon:"", address:"", WARD:"", BEAT_NO:"", PS_NAME:"" };
-let gj = { wards:null, beats:null, police:null };
+const state = {
+  activeRun: 0,
+  croppedUrl: "",
+  data: { date:"", time:"", lat:"", lon:"", address:"", WARD:"", BEAT_NO:"", PS_NAME:"" },
+  gj: { wards:null, beats:null, police:null },
+  countdownTimer: null,
+  countdownLeft: 0,
+  outside: false
+};
 
-/* =========================
-   Helpers
-   ========================= */
-function mark(step){ // 1..6
+/* ========= UI helpers ========= */
+function mark(step){
   els.ms.forEach((chip,i)=>{
     chip.classList.remove('active','done');
     if(i < step-1) chip.classList.add('done');
     if(i === step-1) chip.classList.add('active');
   });
-  const pct = ((step-1)/5)*100;
-  els.bar.style.width = pct + '%';
+  els.bar.style.width = ((step-1)/5*100)+'%';
 }
 function setStatus(msg, cls){ els.status.className = 'status ' + (cls||''); els.status.textContent = msg; }
-function kvRow(k, v){
-  const row = document.createElement('div');
-  row.className='kv';
-  row.innerHTML = `<div class="k">${k}</div><div class="v">${v || '—'}</div>`;
-  return row;
+function kvRow(id, label, value){
+  let row = document.getElementById(id);
+  if(!row){
+    row = document.createElement('div');
+    row.className='kv'; row.id = id;
+    row.innerHTML = `<div class="k">${label}</div><div class="v">—</div>`;
+    els.results.appendChild(row);
+  }
+  if(value!==undefined && value!==null) row.querySelector('.v').textContent = String(value||'—');
 }
-function renderResults(){
-  els.results.innerHTML = '';
-  els.results.appendChild(kvRow('Date', data.date));
-  els.results.appendChild(kvRow('Time', data.time));
-  els.results.appendChild(kvRow('Latitude', data.lat));
-  els.results.appendChild(kvRow('Longitude', data.lon));
-  els.results.appendChild(kvRow('Address', data.address));
-  els.results.appendChild(kvRow('Ward', data.WARD));
-  els.results.appendChild(kvRow('Beat No.', data.BEAT_NO));
-  els.results.appendChild(kvRow('Police Station', data.PS_NAME));
+function renderIncremental(){
+  const d = state.data;
+  kvRow('row-date','Date', d.date);
+  kvRow('row-time','Time', d.time);
+  kvRow('row-lat','Latitude', d.lat);
+  kvRow('row-lon','Longitude', d.lon);
+  kvRow('row-addr','Address', d.address);
+  kvRow('row-ward','Ward', d.WARD);
+  kvRow('row-beat','Beat No.', d.BEAT_NO);
+  kvRow('row-ps','Police Station', d.PS_NAME);
 }
-
 function buildPrefillURL(){
   const p = new URLSearchParams({
-    [ENTRY.date]:    data.date || "",
-    [ENTRY.time]:    data.time || "",
-    [ENTRY.lon]:     data.lon  || "",
-    [ENTRY.lat]:     data.lat  || "",
-    [ENTRY.ward]:    data.WARD || "",
-    [ENTRY.beat]:    data.BEAT_NO || "",
-    [ENTRY.address]: data.address || "",
-    [ENTRY.police]:  data.PS_NAME || "",
+    [ENTRY.date]:    state.data.date || "",
+    [ENTRY.time]:    state.data.time || "",
+    [ENTRY.lon]:     state.data.lon  || "",
+    [ENTRY.lat]:     state.data.lat  || "",
+    [ENTRY.ward]:    state.data.WARD || "",
+    [ENTRY.beat]:    state.data.BEAT_NO || "",
+    [ENTRY.address]: state.data.address || "",
+    [ENTRY.police]:  state.data.PS_NAME || "",
     usp: "pp_url"
   });
   return `https://docs.google.com/forms/d/e/${FORM_ID}/viewform?${p.toString()}`;
 }
+function startRedirectCountdown(sec){
+  clearInterval(state.countdownTimer);
+  els.redirectNote.style.display = 'block';
+  state.countdownLeft = sec;
+  els.redirectNote.innerHTML = `All set. Redirecting to Google Form in <span class="countdown">${sec}s</span>… <a href="#" id="cancelRedirect">Cancel</a>`;
+  state.countdownTimer = setInterval(()=>{
+    state.countdownLeft -= 1;
+    const span = els.redirectNote.querySelector('.countdown');
+    if(span) span.textContent = state.countdownLeft + 's';
+    if(state.countdownLeft <= 0){
+      clearInterval(state.countdownTimer);
+      mark(6); setStatus("Redirecting to Google Form…", "ok");
+      window.location.href = buildPrefillURL();
+    }
+  },1000);
+  els.redirectNote.onclick = (e)=>{
+    if(e.target && e.target.id === 'cancelRedirect'){
+      e.preventDefault();
+      clearInterval(state.countdownTimer);
+      els.redirectNote.innerHTML = `<button id="openFormNow" class="btn">Open Google Form now</button>`;
+      document.getElementById('openFormNow').onclick = ()=>{ window.location.href = buildPrefillURL(); };
+    }
+  };
+}
 
-/* =========================
-   Parsers (overlay patterns)
-   ========================= */
+/* ========= Modal helpers ========= */
+function showOutsideModal(){ els.modalBackdrop.style.display = 'flex'; }
+function hideOutsideModal(){ els.modalBackdrop.style.display = 'none'; }
+
+/* ========= FAST OCR: crop bottom overlay for speed ========= */
+async function cropOverlay(dataURL) {
+  const blob = await (await fetch(dataURL)).blob();
+  const bmp = await createImageBitmap(blob);
+  const W = bmp.width, H = bmp.height;
+  const cropY = Math.round(H * 0.62);
+  const cropH = Math.max(120, Math.round(H * 0.38));
+  const targetW = 1200;
+  const scale = Math.min(1, targetW / W);
+  const outW = Math.round(W * scale), outH = Math.round(cropH * scale);
+  const canvas = document.createElement('canvas'); canvas.width=outW; canvas.height=outH;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(bmp, 0, cropY, W, cropH, 0, 0, outW, outH);
+  const img = ctx.getImageData(0,0,outW,outH); const d = img.data;
+  for (let i=0;i<d.length;i+=4){
+    const y = 0.2126*d[i] + 0.7152*d[i+1] + 0.0722*d[i+2];
+    const v = y > 170 ? 255 : (y < 60 ? 0 : y);
+    d[i]=d[i+1]=d[i+2]=v;
+  }
+  ctx.putImageData(img,0,0);
+  return canvas.toDataURL('image/png');
+}
+
+/* ========= Parsers ========= */
 const RE_LATLON  = /Lat(?:itude)?\s*[:=]?\s*([+-]?\d{1,2}\.\d+)[^\d\-+]+Long(?:itude)?\s*[:=]?\s*([+-]?\d{1,3}\.\d+)/i;
 const RE_DATE_TM = /(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\s+(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i;
 const RE_ADDR    = /([A-Za-z0-9 .,\-()]+,\s*[A-Za-z .]+,\s*(?:India|Maharashtra))/ig;
-
 function parseAll(txt){
   let out = { date:"", time:"", lat:"", lon:"", address:"" };
   let m = RE_LATLON.exec(txt); if(m){ out.lat=m[1]; out.lon=m[2]; }
@@ -321,105 +441,145 @@ function parseAll(txt){
   return out;
 }
 
-/* =========================
-   GeoJSON lookup
-   ========================= */
+/* ========= GeoJSON ========= */
 async function loadGeo(){
   const [w,b,p] = await Promise.all([
     fetch(GEOJSON_WARDS_URL).then(r=>r.json()),
     fetch(GEOJSON_BEATS_URL).then(r=>r.json()),
     fetch(GEOJSON_POLICE_URL).then(r=>r.json())
   ]);
-  gj.wards=w; gj.beats=b; gj.police=p;
+  state.gj.wards=w; state.gj.beats=b; state.gj.police=p;
+}
+function pip(fc, pt, key){
+  if(!fc || !fc.features) return "";
+  for(const f of fc.features){ if(turf.booleanPointInPolygon(pt,f)) return f.properties?.[key] || f.properties?.name || ""; }
+  return "";
 }
 function lookup(lat, lon){
   const pt = turf.point([parseFloat(lon), parseFloat(lat)]);
-  function pip(fc,key){
-    if(!fc || !fc.features) return "";
-    for(const f of fc.features){
-      if(turf.booleanPointInPolygon(pt,f)) return f.properties?.[key] || f.properties?.name || "";
-    }
-    return "";
-  }
   return {
-    WARD:    pip(gj.wards,"WARD"),
-    BEAT_NO: pip(gj.beats,"BEAT_NO"),
-    PS_NAME: pip(gj.police,"PS_NAME")
+    WARD:    pip(state.gj.wards, pt, "WARD"),
+    BEAT_NO: pip(state.gj.beats, pt, "BEAT_NO"),
+    PS_NAME: pip(state.gj.police, pt, "PS_NAME")
   };
 }
 
-/* =========================
-   OCR pipeline
-   ========================= */
-async function runOCR(imgDataUrl){
-  mark(2); setStatus("Running OCR…", "warn"); els.scanner.style.display="block";
-  const worker = await Tesseract.createWorker('eng');
-  const { data: { text } } = await worker.recognize(imgDataUrl, { logger: m => {
-    if(m.status) setStatus(`OCR: ${m.status} ${Math.round((m.progress||0)*100)}%`, "warn");
-  }});
-  await worker.terminate();
-  els.scanner.style.display="none";
-  ocrText = text;
-  mark(3); setStatus("Parsing extracted text…", "warn");
-  const parsed = parseAll(text);
-  data.date = parsed.date; data.time = parsed.time;
-  data.lat = parsed.lat; data.lon = parsed.lon; data.address = parsed.address;
-  renderResults();
+/* ========= Pipeline (auto start on upload, concurrency-safe) ========= */
+async function runPipeline(file){
+  const myRun = ++state.activeRun;
 
-  mark(4); setStatus("GeoJSON lookup in progress…", "warn");
-  if(data.lat && data.lon){
-    const g = lookup(data.lat, data.lon);
-    data.WARD   = g.WARD;
-    data.BEAT_NO= g.BEAT_NO;
-    data.PS_NAME= g.PS_NAME;
-    renderResults();
-  }
-  mark(5); setStatus("Review the results and continue.", "ok");
+  // Remove dropzone, show image cards
+  els.dropCard.style.display = 'none';
+  els.originalCard.style.display = 'block';
+  els.overlayCard.style.display  = 'block';
+  els.overlayWrap.style.display  = 'block';
+
+  const reader = new FileReader();
+  reader.onload = async () => {
+    if(myRun !== state.activeRun) return;
+    const dataUrl = reader.result;
+
+    // Show original photo (small)
+    els.originalImg.src = dataUrl;
+
+    mark(1); setStatus("Image loaded. Starting OCR…", "ok");
+
+    // Build cropped overlay once → show + animate scanner
+    state.croppedUrl = await cropOverlay(dataUrl);
+    if(myRun !== state.activeRun) return;
+    els.overlayImg.src = state.croppedUrl;
+    els.overlayScanner.style.display = "block";  // start scanner on cropped view
+
+    // OCR on cropped
+    mark(2); setStatus("Running OCR…", "warn");
+    const worker = await Tesseract.createWorker('eng');
+    await worker.setParameters({
+      tessedit_char_whitelist: "0123456789:/.-,+() APMapm°'\"IndiaMaharashtraMumbaiAndheriVersovaRoadRdWestEastNorthSouth",
+      tessedit_pageseg_mode: 6, user_defined_dpi: "200"
+    });
+    const { data: { text } } = await worker.recognize(
+      state.croppedUrl,
+      { logger: m => { if(m.status && myRun===state.activeRun) setStatus(`OCR: ${m.status} ${Math.round((m.progress||0)*100)}%`,"warn"); } }
+    );
+    await worker.terminate();
+    if(myRun !== state.activeRun) return;
+    els.overlayScanner.style.display = "none"; // stop scanner
+
+    // Parse → render immediately
+    mark(3); setStatus("Parsing extracted text…", "warn");
+    Object.assign(state.data, parseAll(text));
+    renderIncremental();
+
+    // GeoJSON lookup
+    mark(4); setStatus("GeoJSON lookup…", "warn");
+    let g = {WARD:"",BEAT_NO:"",PS_NAME:""};
+    state.outside = false;
+    if(state.data.lat && state.data.lon){
+      g = lookup(state.data.lat, state.data.lon);
+      Object.assign(state.data, {WARD:g.WARD, BEAT_NO:g.BEAT_NO, PS_NAME:g.PS_NAME});
+      renderIncremental();
+      if(!g.WARD){ state.outside = true; }
+    } else {
+      state.outside = true;
+    }
+
+    if(state.outside){
+      clearInterval(state.countdownTimer);
+      mark(5);
+      setStatus("Outside MCGM Boundaries — Not allowed.", "err");
+      showOutsideModal();
+      return;
+    }
+
+    // All good → Review → auto redirect
+    mark(5); setStatus("Ready. Review the results.", "ok");
+    startRedirectCountdown(5);
+  };
+  reader.readAsDataURL(file);
 }
 
-/* =========================
-   UI wiring
-   ========================= */
+/* ========= Upload wiring ========= */
 els.drop.addEventListener('click', ()=>els.file.click());
 els.drop.addEventListener('dragover', e=>{ e.preventDefault(); els.drop.style.borderColor="#9ec5ff"; });
 els.drop.addEventListener('dragleave', ()=>{ els.drop.style.borderColor="#cfe0f3"; });
 els.drop.addEventListener('drop', e=>{
   e.preventDefault(); els.drop.style.borderColor="#cfe0f3";
   const f = e.dataTransfer.files?.[0]; if(!f) return;
-  currentFile = f; previewFile(f);
+  runPipeline(f); // auto-start
 });
 els.file.addEventListener('change', e=>{
   const f = e.target.files?.[0]; if(!f) return;
-  currentFile = f; previewFile(f);
+  runPipeline(f); // auto-start
 });
 
-function previewFile(f){
-  const reader = new FileReader();
-  reader.onload = ()=>{
-    els.scanwrap.style.display='block';
-    els.preview.src = reader.result;
-    mark(1); setStatus("Image loaded. Click 'Run OCR & Geo'.", "ok");
-  };
-  reader.readAsDataURL(f);
-}
-
-els.btnRun.addEventListener('click', ()=>{
-  if(!currentFile){ setStatus("Please upload an image first.", "warn"); return;}
-  const reader = new FileReader();
-  reader.onload = ()=> runOCR(reader.result);
-  reader.readAsDataURL(currentFile);
-});
-
-els.btnGo.addEventListener('click', ()=>{
-  if(!data.lon || !data.lat){
-    setStatus("Longitude & Latitude are required before continuing.", "warn");
-    return;
+/* ========= Reset (clear storage/caches/cookies) ========= */
+async function hardReset(){
+  try{
+    clearInterval(state.countdownTimer);
+    localStorage.clear(); sessionStorage.clear();
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+    if (indexedDB && indexedDB.databases) {
+      const dbs = await indexedDB.databases();
+      await Promise.all((dbs||[]).map(db => indexedDB.deleteDatabase(db.name)));
+    }
+    document.cookie.split(";").forEach(c=>{
+      const eq = c.indexOf("="); const name = (eq>-1?c.substr(0,eq):c).trim();
+      if(name) document.cookie = name+"=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
+    });
+  } finally {
+    location.reload();
   }
-  mark(6); setStatus("Redirecting to Google Form…", "ok");
-  window.location.href = buildPrefillURL();
-});
+}
+els.btnReset.addEventListener('click', hardReset);
 
-/* Bootstrap */
+/* Modal actions */
+els.modalCancel.addEventListener('click', ()=>{ hideOutsideModal(); });
+els.modalReset.addEventListener('click', ()=>{ hideOutsideModal(); hardReset(); });
+
+/* ========= Bootstrap ========= */
 (async ()=>{
   try{
     await loadGeo();
@@ -428,6 +588,7 @@ els.btnGo.addEventListener('click', ()=>{
     console.error(e);
     setStatus("Could not load GeoJSON (check /data paths / CORS).", "err");
   }
+  renderIncremental(); // placeholders visible even on mobile
   mark(1);
 })();
 </script>
