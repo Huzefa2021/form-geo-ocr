@@ -7,6 +7,7 @@
 
   <!-- Perf: preconnect to CDN for Tesseract assets -->
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://unpkg.com" crossorigin>
 
   <!-- Fonts: Roboto + Noto Sans Devanagari (MCGM-like) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
@@ -65,15 +66,12 @@
       transition: box-shadow .25s ease, background .25s ease, border-color .25s ease;
     }
     .chip .ico{position:relative; width:14px; height:14px; border-radius:50%; flex:0 0 14px}
-    /* PENDING (grey ring) */
     .chip.pending .ico{ border:2px solid #b9c7d6; background:#fff; }
-    /* ACTIVE (spinner, orange glow) */
     .chip.active{ box-shadow:0 0 0 3px rgba(245,158,11,.18), 0 0 18px rgba(245,158,11,.35); border-color:#ffd166; background:#fff8eb; }
     .chip.active .ico{
       border:2px solid #f59e0b; border-top-color:transparent; border-right-color:transparent;
       animation:spin 1s linear infinite; background:#fff;
     }
-    /* DONE (green tick, green glow) */
     .chip.done{ box-shadow:0 0 0 3px rgba(25,135,84,.18), 0 0 18px rgba(25,135,84,.35); border-color:#b9e8cc; background:#eefcf4; }
     .chip.done .ico{ background:#198754; }
     .chip.done .ico::after{
@@ -82,7 +80,6 @@
     }
     @keyframes spin{to{transform:rotate(360deg)}}
 
-    /* Progress bar */
     .bar{height:10px; border-radius:999px; background:#e9f1fb; border:1px solid var(--line); overflow:hidden; margin-top:8px}
     .bar-fill{height:100%; width:0%; background:linear-gradient(90deg,#ffbd59,#ffd166); transition:width .35s ease}
 
@@ -91,6 +88,13 @@
     .ok{color:var(--ok)} .warn{color:var(--warn)} .err{color:var(--err)}
     .countdown{font-weight:700; color:#0b5aa3}
     .stage-times{font-size:12px; color:#3a5677}
+
+    .cdn-pill{
+      margin-left:auto; padding:4px 10px; border-radius:999px; font-size:12px; font-weight:600;
+      border:1px solid #cfe0f3; background:#f7fbff; color:#0c3963;
+    }
+    .cdn-pill.ok{background:#eefcf4; border-color:#b9e8cc; color:#0f5132}
+    .cdn-pill.err{background:#fff0f0; border-color:#f3c0c0; color:#842029}
 
     /* Breadcrumb */
     .crumbs{background:#eef4fb; border-bottom:1px solid var(--line)}
@@ -152,11 +156,7 @@
     /* Images */
     .overlay-container{position:relative; display:none}
     .preview{width:100%; max-width:100%; height:auto; border-radius:10px; border:1px solid var(--line)}
-    /* Original photo fixed to 25% width */
-    .preview-small{
-      width:25%; max-width:25%; min-width:120px;
-      height:auto; border-radius:10px; border:1px solid var(--line);
-    }
+    .preview-small{ width:25%; max-width:25%; min-width:120px; height:auto; border-radius:10px; border:1px solid var(--line); }
     .overlay-scanner{
       position:absolute; top:0; left:0; right:0; height:20%;
       background:linear-gradient(to bottom, rgba(255,187,68,.55), rgba(255,187,68,0));
@@ -173,7 +173,7 @@
     .v{font-family:ui-monospace,Menlo,Consolas,monospace; color:#1b3d62; word-break:break-word}
     @media (min-width: 600px){ .kv{grid-template-columns: 200px 1fr} }
 
-    .footer{margin-top:16px; background:var(--mcgm-blue-dark); color:#e9f2fb; border-top:3px solid var(--mcgm-orange)}
+    .footer{margin-top:16px; background:var(--mcgm-blue-dark); color:#e9f2fb; border-top:3px solid #mcgm-orange}
     .footer-inner{max-width:1180px; margin:0 auto; padding:14px; font-size:clamp(12px,2vw,13px); text-align:center}
     .footer-inner a{color:#ffd166; font-weight:600}
 
@@ -223,8 +223,9 @@
         </div>
         <div class="bar"><div id="bar" class="bar-fill"></div></div>
         <div class="strip-row">
-          <div id="status" class="status">Awaiting upload…</div>
+          <div id="status" class="status">Initializing…</div>
           <div id="redirectNote" class="status" style="display:none"></div>
+          <div id="cdnPill" class="cdn-pill">CDN: Checking…</div>
         </div>
         <div id="stageTimes" class="stage-times">Upload — 0.0s • OCR — 0.0s • Parse — 0.0s • GeoJSON — 0.0s • Review — 0.0s • Redirect — 0.0s</div>
       </div>
@@ -297,7 +298,8 @@
     </div>
   </div>
 
-  <!-- MODAL: Outside boundary -->
+  <!-- MODALS -->
+  <!-- Outside boundary -->
   <div id="modalBackdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
     <div class="modal">
       <div class="m-hdr m-err" id="modalTitle">Outside MCGM Boundaries — Not allowed</div>
@@ -309,7 +311,7 @@
     </div>
   </div>
 
-  <!-- MODAL: Stage Timeout -->
+  <!-- Stage Timeout -->
   <div id="timeoutBackdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="timeoutTitle">
     <div class="modal">
       <div class="m-hdr m-err" id="timeoutTitle">Stage Timed Out</div>
@@ -321,6 +323,23 @@
       <div class="m-actions">
         <button id="timeoutRetry" class="btn btn-primary">Retry</button>
         <button id="timeoutClose" class="btn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CDN Unavailable -->
+  <div id="cdnBackdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="cdnTitle">
+    <div class="modal">
+      <div class="m-hdr m-err" id="cdnTitle">CDN Connectivity Issue</div>
+      <div class="m-body" id="cdnBody">
+        Required OCR assets could not be reached from the current network.<br/><br/>
+        <strong>Try:</strong> Retry the check, or switch to a fallback CDN.<br/><br/>
+        <strong>Admin:</strong> Huzefa Fakhruddin — <a href="mailto:ptradingmumbai@gmail.com">ptradingmumbai@gmail.com</a>
+      </div>
+      <div class="m-actions">
+        <button id="cdnUseFallback" class="btn btn-primary">Use Fallback CDN</button>
+        <button id="cdnRetry" class="btn">Retry</button>
+        <button id="cdnClose" class="btn btn-danger">Close</button>
       </div>
     </div>
   </div>
@@ -341,11 +360,27 @@ const GEOJSON_WARDS_URL  = "./data/wards.geojson";
 const GEOJSON_BEATS_URL  = "./data/beats.geojson";
 const GEOJSON_POLICE_URL = "./data/police_jurisdiction.geojson";
 
+/* ========= CDN endpoints ========= */
+const CDN_PRIMARY = {
+  name: "jsDelivr",
+  workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+  corePath:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@5',
+  langPath:   'https://cdn.jsdelivr.net/npm/@tesseract.js-data'
+};
+const CDN_FALLBACK = {
+  name: "unpkg",
+  workerPath: 'https://unpkg.com/tesseract.js@5/dist/worker.min.js',
+  corePath:   'https://unpkg.com/tesseract.js-core@5',
+  langPath:   'https://unpkg.com/@tesseract.js-data'
+};
+let CDN_CURRENT = {...CDN_PRIMARY};
+let CDN_READY = false;
+
 /* ========= Stage timings & limits ========= */
 const STAGE_NAMES = ["Upload","OCR","Parse","GeoJSON","Review","Redirect"];
-// Limits per stage (ms)
-const STAGE_LIMITS = [20000, 90000, 10000, 15000, 45000, 20000];
+const STAGE_LIMITS = [20000, 90000, 10000, 15000, 45000, 20000]; // ms
 
+/* ========= Elements ========= */
 const els = {
   dropCard: document.getElementById('dropCard'),
   drop: document.getElementById('drop'),
@@ -364,28 +399,37 @@ const els = {
   bar: document.getElementById('bar'),
   results: document.getElementById('results'),
   redirectNote: document.getElementById('redirectNote'),
+  cdnPill: document.getElementById('cdnPill'),
   ms: [
     document.getElementById('ms1'),document.getElementById('ms2'),document.getElementById('ms3'),
     document.getElementById('ms4'),document.getElementById('ms5'),document.getElementById('ms6')
   ],
   stageTimes: document.getElementById('stageTimes'),
+
   modalBackdrop: document.getElementById('modalBackdrop'),
   modalCancel: document.getElementById('modalCancel'),
   modalReset: document.getElementById('modalReset'),
+
   timeoutBackdrop: document.getElementById('timeoutBackdrop'),
   timeoutTitle: document.getElementById('timeoutTitle'),
   timeoutBody: document.getElementById('timeoutBody'),
   timeoutRetry: document.getElementById('timeoutRetry'),
   timeoutClose: document.getElementById('timeoutClose'),
+
+  cdnBackdrop: document.getElementById('cdnBackdrop'),
+  cdnBody: document.getElementById('cdnBody'),
+  cdnRetry: document.getElementById('cdnRetry'),
+  cdnUseFallback: document.getElementById('cdnUseFallback'),
+  cdnClose: document.getElementById('cdnClose'),
 };
 
+/* ========= State ========= */
 const state = {
   activeRun: 0,
   croppedUrl: "",
   data: { date:"", time:"", lat:"", lon:"", address:"", WARD:"", BEAT_NO:"", PS_NAME:"" },
   gj: { wards:null, beats:null, police:null },
   countdownTimer: null,
-  countdownLeft: 0,
   outside: false,
   // timing
   stageStart: Array(6).fill(null),
@@ -444,12 +488,9 @@ function applyChipClasses(activeIndex){
   const fillPct = Math.max(0, Math.min(100, (activeIndex/5)*100));
   els.bar.style.width = fillPct + '%';
 }
-function fmt(ms){
-  if(ms<=0 || !isFinite(ms)) return '0.0s';
-  return (ms/1000).toFixed(1)+'s';
-}
+function fmt(ms){ return (ms>0 && isFinite(ms)) ? (ms/1000).toFixed(1)+'s' : '0.0s'; }
 function updateStageTimes(){
-  const parts = STAGE_NAMES.map((name,i)=>{
+  const parts = ["Upload","OCR","Parse","GeoJSON","Review","Redirect"].map((name,i)=>{
     const running = state.stageStart[i] !== null && (i === currentStageIndex());
     const v = running ? (Date.now() - state.stageStart[i]) : state.stageElapsed[i];
     return `${name} — ${fmt(v)}`;
@@ -457,10 +498,7 @@ function updateStageTimes(){
   els.stageTimes.textContent = parts.join(' • ');
 }
 function currentStageIndex(){
-  for(let i=0;i<6;i++){
-    if(state.stageStart[i] !== null && state.stageElapsed[i] === 0) return i;
-  }
-  // none running; return last completed or 0
+  for(let i=0;i<6;i++){ if(state.stageStart[i] !== null && state.stageElapsed[i] === 0) return i; }
   for(let i=5;i>=0;i--) if(state.stageElapsed[i]>0) return Math.min(i+1,5);
   return 0;
 }
@@ -468,30 +506,20 @@ function currentStageIndex(){
 /* ========= Stage control ========= */
 function startStage(i){
   if(state.timedOut) return;
-  // end any previous running stage defensively
-  for(let k=0;k<i;k++){
-    if(state.stageStart[k]!==null && state.stageElapsed[k]===0){
-      endStage(k);
-    }
-  }
+  for(let k=0;k<i;k++){ if(state.stageStart[k]!==null && state.stageElapsed[k]===0) endStage(k); }
   state.stageStart[i] = Date.now();
   applyChipClasses(i);
-  if(!state.stageTicker){
-    state.stageTicker = setInterval(updateStageTimes, 200);
-  }
-  // start limit timer
+  if(!state.stageTicker) state.stageTicker = setInterval(updateStageTimes, 200);
   clearTimeout(state.stageTimeouts[i]);
   state.stageTimeouts[i] = setTimeout(()=>onStageTimeout(i), STAGE_LIMITS[i]);
 }
 function endStage(i){
-  if(state.stageStart[i]!==null && state.stageElapsed[i]===0){
-    state.stageElapsed[i] = Date.now() - state.stageStart[i];
-  }
+  if(state.stageStart[i]!==null && state.stageElapsed[i]===0) state.stageElapsed[i] = Date.now() - state.stageStart[i];
   clearTimeout(state.stageTimeouts[i]);
   updateStageTimes();
 }
 function onStageTimeout(i){
-  if(state.stageElapsed[i]>0 || state.timedOut) return; // already finished or already timed out
+  if(state.stageElapsed[i]>0 || state.timedOut) return;
   state.timedOut = true;
   const name = STAGE_NAMES[i];
   const limit = (STAGE_LIMITS[i]/1000).toFixed(0)+'s';
@@ -596,8 +624,51 @@ function lookup(lat, lon){
   };
 }
 
+/* ========= CDN CHECK ========= */
+async function probe(url){
+  try{
+    const res = await fetch(url, { method:'GET', headers:{ 'Range':'bytes=0-15' }, cache:'no-store', mode:'cors' });
+    return res.ok || res.status === 206 || res.status === 416; // 416 if range not satisfiable but reachable
+  }catch(e){ return false; }
+}
+async function checkCDN(cdn){
+  const okWorker = await probe(cdn.workerPath);
+  // try either wasm variant (some builds pick simd)
+  const okCoreA = await probe(cdn.corePath + '/tesseract-core.wasm.js');
+  const okCoreB = okCoreA ? true : await probe(cdn.corePath + '/tesseract-core-simd.wasm.js');
+  const okLang  = await probe(cdn.langPath + '/eng/4.0.0/eng.traineddata.gz');
+  return okWorker && (okCoreA || okCoreB) && okLang;
+}
+function showCDNModal(msg){
+  els.cdnBody.innerHTML = `
+    ${msg || 'Required OCR assets could not be reached from the current network.'}<br/><br/>
+    <strong>Admin:</strong> Huzefa Fakhruddin — <a href="mailto:ptradingmumbai@gmail.com">ptradingmumbai@gmail.com</a>
+  `;
+  els.cdnBackdrop.style.display = 'flex';
+}
+async function initCDN(){
+  els.cdnPill.textContent = `CDN: Checking ${CDN_CURRENT.name}…`;
+  els.cdnPill.className = 'cdn-pill';
+  const ok = await checkCDN(CDN_CURRENT);
+  CDN_READY = ok;
+  if(ok){
+    els.cdnPill.textContent = `CDN: Connected (${CDN_CURRENT.name})`;
+    els.cdnPill.className = 'cdn-pill ok';
+    setStatus("Maps loaded & CDN ready. Upload an image to begin.", "ok");
+  }else{
+    els.cdnPill.textContent = `CDN: Unreachable (${CDN_CURRENT.name})`;
+    els.cdnPill.className = 'cdn-pill err';
+    setStatus("CDN blocked or offline. Open the CDN dialog.", "err");
+    showCDNModal(`Could not reach ${CDN_CURRENT.name} endpoints for worker/core/lang assets.`);
+  }
+}
+
 /* ========= Pipeline ========= */
 async function runPipeline(file){
+  if(!CDN_READY){
+    showCDNModal(`CDN ${CDN_CURRENT.name} is not ready. Please Retry or Switch to fallback.`);
+    return;
+  }
   const myRun = ++state.activeRun;
 
   // Remove dropzone, show image cards
@@ -634,14 +705,11 @@ async function runPipeline(file){
     els.overlayScanner.style.display = "block";
 
     try {
+      // Worker WITHOUT logger (prevents DataCloneError); using current CDN paths
       const worker = await Tesseract.createWorker({
-        workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
-        corePath:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1',
-        langPath:   'https://cdn.jsdelivr.net/npm/@tesseract.js-data',
-        logger: m => { if (m?.status && myRun===state.activeRun) {
-          const pct = Math.round((m.progress || 0) * 100);
-          setStatus(`OCR: ${m.status} ${pct}%`, "warn");
-        }}
+        workerPath: CDN_CURRENT.workerPath,
+        corePath:   CDN_CURRENT.corePath,
+        langPath:   CDN_CURRENT.langPath
       });
       await worker.loadLanguage('eng');
       await worker.initialize('eng');
@@ -689,7 +757,6 @@ async function runPipeline(file){
       // Stage 5: Review
       startStage(4);
       setStatus("Ready. Review the results.", "ok");
-      // Immediately cue redirect → end Review, start Redirect
       endStage(4);
 
       // Stage 6: Redirect
@@ -700,18 +767,17 @@ async function runPipeline(file){
       console.error("Worker OCR failed. Trying fallback:", e);
       els.overlayScanner.style.display = "none";
 
-      // End OCR if it was running too long? We'll end it only after fallback success.
-      // Fallback: single-threaded recognize
+      // Fallback: single-threaded recognize (logger OK here; no worker boundary)
       try {
         const { data: { text } } = await Tesseract.recognize(
           state.croppedUrl, 'eng',
           {
-            corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1',
-            langPath: 'https://cdn.jsdelivr.net/npm/@tesseract.js-data',
-            logger: m => { if (m?.status) setStatus(`OCR (fallback): ${m.status} ${Math.round((m.progress||0)*100)}%`, "warn"); }
+            corePath: CDN_CURRENT.corePath,
+            langPath: CDN_CURRENT.langPath,
+            logger: m => { /* optional: progress on main thread */ }
           }
         );
-        endStage(1); // finish OCR after fallback
+        endStage(1); // mark OCR done after fallback
 
         startStage(2);
         setStatus("Parsing extracted text…", "warn");
@@ -721,8 +787,7 @@ async function runPipeline(file){
 
         startStage(3);
         setStatus("GeoJSON lookup…", "warn");
-        let g = {WARD:"",BEAT_NO:"",PS_NAME:""};
-        state.outside = false;
+        let g = {WARD:"",BEAT_NO:"",PS_NAME:""}; state.outside = false;
         if(state.data.lat && state.data.lon){
           g = lookup(state.data.lat, state.data.lon);
           Object.assign(state.data, {WARD:g.WARD, BEAT_NO:g.BEAT_NO, PS_NAME:g.PS_NAME});
@@ -731,22 +796,15 @@ async function runPipeline(file){
         } else { state.outside = true; }
         endStage(3);
 
-        if(state.outside){
-          setStatus("Outside MCGM Boundaries — Not allowed.", "err");
-          showOutsideModal(); return;
-        }
+        if(state.outside){ setStatus("Outside MCGM Boundaries — Not allowed.", "err"); showOutsideModal(); return; }
 
-        startStage(4);
-        setStatus("Ready. Review the results.", "ok");
-        endStage(4);
-
-        startStage(5);
-        startRedirectCountdown(5);
+        startStage(4); setStatus("Ready. Review the results.", "ok"); endStage(4);
+        startStage(5); startRedirectCountdown(5);
 
       } catch (e2) {
         console.error("Fallback OCR failed:", e2);
         setStatus("OCR could not complete. Tap Retry.", "err");
-        onStageTimeout(1); // surface timeout-like modal for assistance
+        onStageTimeout(1);
       }
     }
   };
@@ -799,17 +857,25 @@ els.modalReset.addEventListener('click', ()=>{ els.modalBackdrop.style.display='
 els.timeoutRetry.addEventListener('click', ()=>{ els.timeoutBackdrop.style.display='none'; hardReset(); });
 els.timeoutClose.addEventListener('click', ()=>{ els.timeoutBackdrop.style.display='none'; });
 
+els.cdnRetry.addEventListener('click', async ()=>{ els.cdnBackdrop.style.display='none'; await initCDN(); });
+els.cdnUseFallback.addEventListener('click', async ()=>{
+  CDN_CURRENT = {...CDN_FALLBACK};
+  els.cdnBackdrop.style.display='none';
+  await initCDN();
+});
+els.cdnClose.addEventListener('click', ()=>{ els.cdnBackdrop.style.display='none'; });
+
 /* ========= Bootstrap ========= */
 (async ()=>{
   try{
     await loadGeo();
-    setStatus("Maps loaded. Upload an image to begin.", "ok");
+    setStatus("Maps loaded. Checking CDN…", "ok");
   }catch(e){
     console.error(e);
     setStatus("Could not load GeoJSON (check /data paths / CORS).", "err");
   }
-  // seed initial times row
   updateStageTimes();
+  await initCDN(); // 🔍 CDN check on load
 })();
 </script>
 </body>
