@@ -41,8 +41,8 @@
             <div class="brand-sub">Abandoned Vehicles – Identification &amp; Pre-Notice (Marshal Upload)</div>
           </div>
           <div class="header-actions">
-            <button id="btnReset" class="btn-reset">Reset</button>
-            <div class="partner-badge">
+            <button id="btnReset" class="btn-reset" type="button">Reset</button>
+            <div class="partner-badge" title="Crescendo Innovative Solutions LLP">
               <img src="./data/Crescendo%20Logo.png" alt="Crescendo Innovative Solutions LLP" />
             </div>
           </div>
@@ -51,21 +51,23 @@
 
       <div class="progress-strip">
         <div class="progress-inner">
-          <div class="milestones">
-            <div id="ms1" class="chip pending"><span class="ico"></span><span>Upload</span></div>
-            <div id="ms2" class="chip pending"><span class="ico"></span><span>OCR</span></div>
-            <div id="ms3" class="chip pending"><span class="ico"></span><span>Parse</span></div>
-            <div id="ms4" class="chip pending"><span class="ico"></span><span>GeoJSON</span></div>
-            <div id="ms5" class="chip pending"><span class="ico"></span><span>Review</span></div>
-            <div id="ms6" class="chip pending"><span class="ico"></span><span>Redirect</span></div>
+          <div class="milestones" aria-label="Processing stages">
+            <div id="ms1" class="chip pending"><span class="ico" aria-hidden="true"></span><span>Upload</span></div>
+            <div id="ms2" class="chip pending"><span class="ico" aria-hidden="true"></span><span>OCR</span></div>
+            <div id="ms3" class="chip pending"><span class="ico" aria-hidden="true"></span><span>Parse</span></div>
+            <div id="ms4" class="chip pending"><span class="ico" aria-hidden="true"></span><span>GeoJSON</span></div>
+            <div id="ms5" class="chip pending"><span class="ico" aria-hidden="true"></span><span>Review</span></div>
+            <div id="ms6" class="chip pending"><span class="ico" aria-hidden="true"></span><span>Redirect</span></div>
           </div>
 
-          <div class="bar"><div id="bar" class="bar-fill"></div></div>
+          <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+            <div id="bar" class="bar-fill" style="width:0%"></div>
+          </div>
 
           <div class="strip-row">
             <div id="status" class="status">Initializing…</div>
             <div id="redirectNote" class="status" style="display: none"></div>
-            <div id="cdnPill" class="cdn-pill">CDN: checking…</div>
+            <div id="cdnPill" class="cdn-pill" title="OCR library source">CDN: checking…</div>
           </div>
 
           <div id="stageTimes" class="stage-times">
@@ -76,7 +78,7 @@
     </div>
 
     <!-- BREADCRUMBS -->
-    <div class="crumbs">
+    <div class="crumbs" aria-label="Breadcrumb">
       <div class="crumbs-inner">
         <a href="https://www.mcgm.gov.in" target="_blank" rel="noopener">Home</a> › Abandoned Vehicles › Marshal Upload
       </div>
@@ -85,15 +87,15 @@
     <!-- MAIN -->
     <div class="wrap">
       <div class="grid">
-        <!-- Left -->
+        <!-- Left column -->
         <div class="col-image">
           <div id="dropCard" class="card">
             <div class="hdr"><div class="title">Upload Photo</div></div>
             <div class="body">
-              <div id="drop" class="drop" role="button">
+              <div id="drop" class="drop" role="button" tabindex="0" aria-label="Choose image">
                 <div>
                   <div class="dz-title">Tap to choose image</div>
-                  <div class="dz-hint">or drag & drop (JPG/PNG from GPS Map Camera)</div>
+                  <div class="dz-hint">or drag &amp; drop (JPG/PNG from GPS Map Camera)</div>
                 </div>
               </div>
               <input id="file" type="file" accept="image/*" hidden />
@@ -114,17 +116,17 @@
             <div class="body">
               <div id="overlayWrap" class="photo-surface overlay-container">
                 <img id="overlayImg" class="preview" alt="cropped overlay" />
-                <div id="overlayScanner" class="overlay-scanner"></div>
+                <div id="overlayScanner" class="overlay-scanner" aria-hidden="true"></div>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- Right -->
+        <!-- Right column -->
         <div class="col-results">
           <div class="card">
             <div class="hdr"><div class="title">Results</div></div>
-            <div id="results" class="body"></div>
+            <div id="results" class="body" aria-live="polite" aria-atomic="true"></div>
           </div>
         </div>
       </div>
@@ -133,29 +135,35 @@
     <!-- FOOTER -->
     <div class="footer">
       <div class="footer-inner">
-        Developed by <strong>Crescendo Innovative Solutions LLP</strong>. All rights reserved by <strong>Crescendo</strong> •
-        Admin: <strong>Huzefa Fakhruddin</strong> —
-        <a href="mailto:Care@crescendoits.com">Care@crescendoits.com</a> • &copy; 2025 Municipal Corporation of Greater
-        Mumbai (MCGM) — <a href="https://www.mcgm.gov.in" target="_blank" rel="noopener">www.mcgm.gov.in</a>
-        <div style="margin-top: 6px; opacity: 0.9">Build: <span id="appVersion">v2025.08.17</span></div>
+        <div class="line">Developed by <strong>Crescendo Innovative Solutions LLP</strong></div>
+        <div class="line">All rights reserved by &copy; <strong>Crescendo</strong></div>
+        <div class="line">
+          Admin: <strong>Huzefa Fakhruddin</strong> —
+          <a href="mailto:Care@crescendoits.com">Care@crescendoits.com</a>
+        </div>
+        <div class="line">
+          &copy; Municipal Corporation of Greater Mumbai (MCGM) —
+          <a href="https://www.mcgm.gov.in" target="_blank" rel="noopener">www.mcgm.gov.in</a>
+        </div>
+        <div class="build">Build: <span id="appVersion">v2025.08.17 Prod.v1</span></div>
       </div>
     </div>
 
     <!-- MODALS -->
-    <div id="modalBackdrop" class="modal-backdrop" style="display: none" role="dialog" aria-modal="true">
+    <div id="modalBackdrop" class="modal-backdrop" style="display: none" role="dialog" aria-modal="true" aria-labelledby="outsideTitle">
       <div class="modal">
-        <div class="m-hdr">Outside MCGM Boundaries — Not allowed</div>
+        <div id="outsideTitle" class="m-hdr">Outside MCGM Boundaries — Not allowed</div>
         <div class="m-body">
           The detected coordinates are not inside MCGM ward polygons. You cannot submit this entry.
         </div>
         <div class="m-actions">
-          <button id="modalCancel" class="btn">Cancel</button>
-          <button id="modalReset" class="btn btn-danger">Reset Session</button>
+          <button id="modalCancel" class="btn" type="button">Cancel</button>
+          <button id="modalReset" class="btn btn-danger" type="button">Reset Session</button>
         </div>
       </div>
     </div>
 
-    <div id="timeoutBackdrop" class="modal-backdrop" style="display: none" role="dialog" aria-modal="true">
+    <div id="timeoutBackdrop" class="modal-backdrop" style="display: none" role="dialog" aria-modal="true" aria-labelledby="timeoutTitle">
       <div class="modal">
         <div id="timeoutTitle" class="m-hdr m-err">Stage Timed Out</div>
         <div id="timeoutBody" class="m-body">
@@ -165,8 +173,8 @@
           <a href="mailto:Care@crescendoits.com">Care@crescendoits.com</a>
         </div>
         <div class="m-actions">
-          <button id="timeoutRetry" class="btn btn-primary">Retry</button>
-          <button id="timeoutClose" class="btn">Close</button>
+          <button id="timeoutRetry" class="btn btn-primary" type="button">Retry</button>
+          <button id="timeoutClose" class="btn" type="button">Close</button>
         </div>
       </div>
     </div>
