@@ -1,9 +1,4 @@
-/* app.js — stable DnD + single-open picker + preview + OCR/GeoJSON pipeline
-   - Guards against double wiring and double picker
-   - Stops event bubbling from nested labels
-   - Fallback image decoding if createImageBitmap is unavailable
-   - Everything else (OCR/parse/grid) same behaviour as before
-*/
+/* app.js — stable DnD + single-open picker + guaranteed cropped overlay preview */
 
 /* ======================== CONFIG ======================== */
 const CFG = {
@@ -13,12 +8,16 @@ const CFG = {
     police: './data/police_jurisdiction.geojson',
   },
   crop: {
+    // search band for the dark ribbon
     bottomStartFrac: 0.72,
     ribbonMinHeightFrac: 0.16,
     ribbonMaxHeightFrac: 0.26,
+    // trim the small map and badge on the left
     leftCutPx: 80,
+    // a little right breathing room
     rightPadPx: 16,
-    fallbackRect: { xFrac: 0.33, yFrac: 0.74, wFrac: 0.65, hFrac: 0.22 }
+    // absolute fallback rectangle (if the detector can’t find the ribbon)
+    fallbackRect: { xFrac: 0.35, yFrac: 0.74, wFrac: 0.60, hFrac: 0.22 }
   },
   cityWindow: { latMin: 18.0, latMax: 20.8, lngMin: 72.0, lngMax: 73.3 },
   dom: {
@@ -36,7 +35,7 @@ const CFG = {
 /* ===================== DOM HELPERS ====================== */
 const $ = s => document.querySelector(s);
 const setText = (sel, v) => { const el = $(sel); if (el) el.textContent = v ?? '—'; };
-const setImg  = (sel, src) => { const el = $(sel); if (el && src) { el.src = src; el.removeAttribute('title'); } };
+const setImg  = (sel, src) => { const el = $(sel); if (el && src) { el.src = src; el.style.display='block'; el.style.maxWidth='100%'; el.style.height='auto'; } };
 
 function findHeading(regex) {
   const nodes = document.querySelectorAll('h1,h2,h3,h4,h5,h6,.card-title,.panel-title,legend');
@@ -52,6 +51,21 @@ function findCardBody(headingNode) {
     if (c.querySelector('img') || c.clientHeight >= 60) return c;
   }
   return p || headingNode;
+}
+function findCropHost() {
+  // Preferred: explicit hook
+  return document.querySelector('[data-crop-host]')
+      // Next: by heading text
+      || (()=>{
+          const h = findHeading(/cropped overlay|gps text|overlay/i);
+          return h ? findCardBody(h) : null;
+         })()
+      // Known class/id fallbacks
+      || document.querySelector('#crop-panel, .crop-panel, .results-right, .card:has(#res-address)')
+      // As a last resort: the results card parent
+      || document.querySelector('#res-address')?.closest('.card, .panel, .box')
+      // Absolute fallback
+      || document.body;
 }
 
 /* create preview <img> if missing */
@@ -72,18 +86,15 @@ function ensurePreviewImages() {
   }
   // Cropped
   if (!$(CFG.dom.cropImg)) {
-    const heading = findHeading(/cropped overlay/i);
-    const host = heading ? findCardBody(heading) : null;
-    if (host) {
-      const img = document.createElement('img');
-      img.id = CFG.dom.cropImg.slice(1);
-      img.alt = 'Cropped Overlay';
-      img.style.display = 'block';
-      img.style.maxWidth = '90%';
-      img.style.margin = '12px auto';
-      img.style.height = 'auto';
-      host.appendChild(img);
-    }
+    const host = findCropHost();
+    const img = document.createElement('img');
+    img.id = CFG.dom.cropImg.slice(1);
+    img.alt = 'Cropped Overlay (GPS text)';
+    img.style.display = 'block';
+    img.style.maxWidth = '90%';
+    img.style.margin = '12px auto';
+    img.style.height = 'auto';
+    host.appendChild(img);
   }
 }
 
@@ -108,7 +119,7 @@ async function fileToBitmap(file) {
   if ('createImageBitmap' in window) {
     try { return await createImageBitmap(file); } catch {}
   }
-  // Fallback: FileReader -> Image -> draw to canvas -> bitmap-like object
+  // Fallback: FileReader -> Image -> draw to canvas -> pseudo-bitmap
   const dataURL = await new Promise((res, rej) => {
     const fr = new FileReader();
     fr.onload = () => res(fr.result);
@@ -124,11 +135,10 @@ async function fileToBitmap(file) {
   const c = document.createElement('canvas');
   c.width = imgEl.naturalWidth; c.height = imgEl.naturalHeight;
   c.getContext('2d').drawImage(imgEl, 0, 0);
-  // return a pseudo-bitmap (canvas acts as source for drawImage)
   return { width: c.width, height: c.height, _canvas: c };
 }
 function canvasFromBitmap(bmp) {
-  if (bmp._canvas) return bmp._canvas; // fallback path
+  if (bmp._canvas) return bmp._canvas;
   const c = document.createElement('canvas');
   c.width = bmp.width; c.height = bmp.height;
   c.getContext('2d').drawImage(bmp, 0, 0);
@@ -141,7 +151,7 @@ function computeRibbonRect(bmp) {
   const { width:w, height:h } = bmp;
   const ctx = canvasFromBitmap(bmp).getContext('2d', { willReadFrequently: true });
   const startY = Math.floor(h * CFG.crop.bottomStartFrac);
-  const scanH  = h - startY;
+  const scanH  = Math.max(1, h - startY);
   const imgData = ctx.getImageData(0, startY, w, scanH);
   const px = imgData.data;
 
@@ -154,8 +164,8 @@ function computeRibbonRect(bmp) {
     }
     rowLuma[y] = sum / w;
   }
-  const minH = Math.floor(h * CFG.crop.ribbonMinHeightFrac);
-  const maxH = Math.floor(h * CFG.crop.ribbonMaxHeightFrac);
+  const minH = Math.max(10, Math.floor(h * CFG.crop.ribbonMinHeightFrac));
+  const maxH = Math.max(minH+4, Math.floor(h * CFG.crop.ribbonMaxHeightFrac));
   let best = null;
   for (let hh = minH; hh <= maxH; hh += Math.max(4, Math.floor(h*0.01))) {
     for (let y = 0; y + hh <= scanH; y += 4) {
@@ -165,15 +175,15 @@ function computeRibbonRect(bmp) {
       if (!best || avg < best.avg) best = { y, hh, avg };
     }
   }
-  if (!best) {
-    const r = CFG.crop.fallbackRect;
-    return { x: Math.floor(w*r.xFrac), y: Math.floor(h*r.yFrac), w: Math.floor(w*r.wFrac), h: Math.floor(h*r.hFrac) };
-  }
+  if (!best) return null;
   const x = Math.max(CFG.crop.leftCutPx, 0);
   const y = startY + best.y;
-  const rectW = w - x - CFG.crop.rightPadPx;
-  const rectH = best.hh;
+  const rectW = Math.max(10, w - x - CFG.crop.rightPadPx);
+  const rectH = Math.max(10, best.hh);
   return { x, y, w: rectW, h: rectH };
+}
+function validRect(r, w, h) {
+  return !!r && r.w > 10 && r.h > 10 && r.x >= 0 && r.y >= 0 && (r.x + r.w) <= w && (r.y + r.h) <= h;
 }
 function cropCanvas(bmp, rect) {
   const src = canvasFromBitmap(bmp);
@@ -183,7 +193,7 @@ function cropCanvas(bmp, rect) {
   return c;
 }
 
-/* =================== OCR & PARSING (same logic) =================== */
+/* =================== OCR & PARSING =================== */
 function norm(s){
   return s.replace(/[|]/g,'1').replace(/O/g,'0').replace(/°/g,'')
           .replace(/\u00A0/g,' ').replace(/—/g,'-').replace(/,\s*(\d)/g,'.$1');
@@ -217,14 +227,14 @@ function pickAddress(text){
   const cue=/(mumbai|maharashtra|india|road|rd|nagar|colony|society|west|east|andheri|goregaon)/i;
   let picked=lines.filter(l=>cue.test(l)); if(!picked.length) picked=lines;
   let addr=picked.join(', ').replace(/\bGMT.*$/i,'').replace(/\b(?:AM|PM)\b.*$/i,'').trim();
-  return addr||'—';
+  return addr || '—';
 }
 async function ocrCanvas(canvas, lang='eng'){
   const res=await Tesseract.recognize(canvas, lang, { logger:()=>{} });
   return (res&&res.data&&res.data.text)?res.data.text:'';
 }
 
-/* =================== GEOJSON GRID (same) =================== */
+/* =================== GEOJSON GRID =================== */
 const geoIndex={wards:null,beats:null,police:null,grid:{wards:new Map(),beats:new Map(),police:new Map()},bbox:{wards:null,beats:null,police:null},loaded:false};
 async function loadGeo(){
   if(geoIndex.loaded) return;
@@ -293,9 +303,17 @@ async function processFile(file){
   const originalUrl=dataURLFromCanvas(canvasFromBitmap(bmp));
   setImg(CFG.dom.origImg, originalUrl);
 
-  const rect=computeRibbonRect(bmp);
+  let rect=computeRibbonRect(bmp);
+  // Make sure we always have a valid rectangle
+  if(!validRect(rect, bmp.width, bmp.height)) {
+    const f=CFG.crop.fallbackRect;
+    rect = { x: Math.floor(bmp.width*f.xFrac), y: Math.floor(bmp.height*f.yFrac),
+             w: Math.floor(bmp.width*f.wFrac), h: Math.floor(bmp.height*f.hFrac) };
+  }
+
   const cropCv=cropCanvas(bmp, rect);
   setImg(CFG.dom.cropImg, dataURLFromCanvas(cropCv));
+
   const t1=performance.now();
 
   // OCR with Marathi fallback when Devanagari is detected
@@ -349,7 +367,7 @@ function wireInputAndDrop(){
   const drop  = findDropZone();
   ensurePreviewImages();
 
-  // If there's a visible label inside, let it handle the click (avoid double open)
+  // Avoid double-open if input is inside label
   const hasInnerLabel = drop && drop.querySelector('label[for]');
 
   if (drop && input && !hasInnerLabel) {
@@ -361,18 +379,13 @@ function wireInputAndDrop(){
       input.click();
       setTimeout(() => openingPicker = false, 600);
     }, { passive:false });
-    drop.addEventListener('pointerdown', () => { /* capture gesture to satisfy iOS */ }, { passive:true });
   }
 
   if (input) {
     input.setAttribute('accept', 'image/jpeg,image/png');
     input.addEventListener('change', (e) => {
       const f = e.target.files && e.target.files[0];
-      if (f) {
-        processFile(f);
-        // allow selecting same file again later
-        try { e.target.value = ''; } catch {}
-      }
+      if (f) { processFile(f); try { e.target.value = ''; } catch {} }
     }, { passive:true });
   }
 
