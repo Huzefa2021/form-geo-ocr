@@ -1,5 +1,6 @@
 /* =========================================================
    MCGM – Marshal Upload Portal : Application Script (app.js)
+   Build: v2025.08.17.Prod.v7
    ========================================================= */
 
 /* ---------- Tiny DOM util ---------- */
@@ -29,7 +30,7 @@ const ENTRY={
   address:"entry.1188611077", police:"entry.1555105834"
 };
 const STAGE_LIMITS=[20000,90000,12000,15000,45000,20000];
-const BUILD="v2025.08.17.Prod.v5";
+const BUILD="v2025.08.17.Prod.v7";
 const MUMBAI_BBOX=[72.60,18.80,73.20,19.50];
 
 /* ---------- Elements ---------- */
@@ -47,7 +48,6 @@ const els={
 /* ---------- State ---------- */
 const state={
   activeRun:0,
-  croppedUrl:"",
   data:{ date:"", time:"", lat:"", lon:"", address:"", WARD:"", BEAT_NO:"", PS_NAME:"" },
   gjIndex:{ wards:null, beats:null, police:null },
   counts:{ wards:0, beats:0, police:0 },
@@ -126,73 +126,130 @@ function lookup(lat,lon){
   return {WARD:ward,BEAT_NO:beat,PS_NAME:ps,outside};
 }
 
-/* ---------- Imaging ---------- */
-async function cropOverlay(dataURL){
+/* ---------- Imaging & Preprocessing ---------- */
+async function cropToBand(dataURL, frac){
   const blob=await (await fetch(dataURL)).blob();
   const bmp=await createImageBitmap(blob);
-  const W=bmp.width,H=bmp.height, cropY=Math.round(H*0.62), cropH=Math.max(120,Math.round(H*0.38));
-  const targetW=1200, scale=Math.min(1,targetW/W), outW=Math.round(W*scale), outH=Math.round(cropH*scale);
-  const c=document.createElement("canvas"); c.width=outW; c.height=outH; const ctx=c.getContext("2d");
+  const W=bmp.width, H=bmp.height;
+  const cropH=Math.max(120,Math.round(H*frac));
+  const cropY=Math.max(0, H - cropH);
+  const targetW=1400, scale=Math.min(1,targetW/W);
+  const outW=Math.round(W*scale), outH=Math.round(cropH*scale);
+  const c=document.createElement("canvas"); c.width=outW; c.height=outH;
+  const ctx=c.getContext("2d",{willReadFrequently:true});
   ctx.drawImage(bmp,0,cropY,W,cropH,0,0,outW,outH);
-  const img=ctx.getImageData(0,0,outW,outH), d=img.data;
-  for(let i=0;i<d.length;i+=4){ const y=0.2126*d[i]+0.7152*d[i+1]+0.0722*d[i+2]; const v=y>175?255:y<55?0:y; d[i]=d[i+1]=d[i+2]=v; }
+  return c;
+}
+function canvasToDataURL(c){ return c.toDataURL("image/png"); }
+
+function enhanceWithCV(canvas){
+  try{
+    if(!(window.__cvLoaded && window.cv && cv.Mat)) return null;
+    const src  = cv.imread(canvas);
+    const gray = new cv.Mat(); cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+    cv.equalizeHist(gray, gray);
+    const blur = new cv.Mat(); cv.GaussianBlur(gray, blur, new cv.Size(3,3), 0, 0, cv.BORDER_DEFAULT);
+
+    const bin1 = new cv.Mat(); // adaptive
+    cv.adaptiveThreshold(blur, bin1, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 21, 10);
+    const bin2 = new cv.Mat(); // Otsu
+    cv.threshold(blur, bin2, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
+
+    // choose whitest
+    const m1 = cv.mean(bin1)[0], m2 = cv.mean(bin2)[0];
+    let best = m1>=m2 ? bin1 : bin2;
+
+    // Ensure white background using MEDIAN ( steadier than mean )
+    const hist = new cv.Mat();
+    cv.calcHist([best], [0], new cv.Mat(), hist, [256], [0,256]);
+    let cum=0, medianIdx=0, total=cv.countNonZero(best);
+    for(let i=0;i<256;i++){ cum+=hist.data32F[i]; if(cum>=total/2){ medianIdx=i; break; } }
+    if (medianIdx < 127) { const inv=new cv.Mat(); cv.bitwise_not(best, inv); best.delete(); best=inv; }
+    hist.delete();
+
+    const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(2,2));
+    cv.morphologyEx(best, best, cv.MORPH_CLOSE, kernel);
+    cv.GaussianBlur(best, best, new cv.Size(3,3), 0, 0, cv.BORDER_DEFAULT);
+
+    cv.imshow(canvas, best);
+    const url = canvas.toDataURL("image/png");
+
+    src.delete(); gray.delete(); blur.delete(); bin1.delete(); bin2.delete(); best.delete(); kernel.delete();
+    return url;
+  }catch(e){ return null; }
+}
+function enhanceWithCanvas(canvas){
+  const ctx=canvas.getContext("2d",{willReadFrequently:true});
+  const {width:w,height:h}=canvas;
+  const img=ctx.getImageData(0,0,w,h), d=img.data;
+  for(let i=0;i<d.length;i+=4){
+    const y=0.2126*d[i]+0.7152*d[i+1]+0.0722*d[i+2];
+    const ys = Math.min(255, Math.max(0, (y-40)*1.6 ));
+    const v = ys>150 ? 255 : ys<70 ? 0 : ys;
+    d[i]=d[i+1]=d[i+2]=v;
+  }
   ctx.putImageData(img,0,0);
-  return c.toDataURL("image/png");
+  const img2=ctx.getImageData(0,0,w,h), d2=img2.data;
+  let sum=0; for(let i=0;i<d2.length;i+=4) sum+=d2[i];
+  const mean=sum/(d2.length/4);
+  if(mean<127){ for(let i=0;i<d2.length;i+=4){ d2[i]=255-d2[i]; d2[i+1]=255-d2[i+1]; d2[i+2]=255-d2[i+2]; } ctx.putImageData(img2,0,0); }
+  return canvas.toDataURL("image/png");
+}
+/* Returns {displayUrl, ocrUrl} */
+async function cropOverlay(dataURL){
+  // Wider sweep – auto picks clearest
+  const bands=[0.45,0.40,0.36,0.32];
+  let best=null, bestMean=-1;
+  for(const f of bands){
+    const c = await cropToBand(dataURL, f);
+    let url = enhanceWithCV(c);
+    if(!url) url = enhanceWithCanvas(c);
+    const ctx=c.getContext("2d");
+    const img=ctx.getImageData(0,0,c.width,c.height).data;
+    let sum=0; for(let i=0;i<img.length;i+=4) sum+=img[i];
+    const mean=sum/(img.length/4);
+    if(mean>bestMean){ bestMean=mean; best={displayUrl:canvasToDataURL(c), ocrUrl:url}; }
+  }
+  return best;
 }
 
 /* ---------- Address & Coordinates (hardened) ---------- */
-
-/* Clean general punctuation/garbage but keep EN + Devanagari + digits */
 function cleanAddressBasic(a){
   a=String(a||"");
-  a=a.replace(/\b[\w]{3,}\+[\w]{2,}\b/gi," ");                  // plus-codes
+  a=a.replace(/\b[\w]{3,}\+[\w]{2,}\b/gi," ");                 // plus-codes
   a=a.replace(/(?:GPS|Map|Camera|Wind|Humidity|Pressure|Temperature|Google).*/i," ");
   a=a.replace(/[^0-9A-Za-z\u0900-\u097F ,./\-]/g," ");
   a=a.replace(/\s{2,}/g," ").replace(/\s*,\s*/g,", ").replace(/,\s*,/g,", ").replace(/^\s*,\s*|\s*,\s*$/g,"");
   a=a.replace(/,?\s*India\s*,\s*India/i,", India").trim();
   return a;
 }
-
-/* Score & pick best English-dominant segment(s) */
-const STREET_KEYS=["road","rd","lane","ln","marg","nagar","society","chawl","bldg","building","sector","plot","opp","opposite","near","behind","east","west","north","south","estate","industrial","midc"];
+const STREET_KEYS=["road","rd","lane","ln","marg","nagar","society","chawl","bldg","building","sector","plot","opp","opposite","near","behind","east","west","north","south","estate","industrial","midc","central","marol","andheri","santacruz","vakola","khar"];
 const CITY_KEYS=["mumbai","thane","navi mumbai","maharashtra","india"];
 function latinRatio(s){ const en=(s.match(/[A-Za-z]/g)||[]).length; const dev=(s.match(/[\u0900-\u097F]/g)||[]).length; const tot=en+dev; return tot?en/tot:1; }
 function looksUsefulSeg(s){
   const t=s.trim();
   if(!t) return false;
   if(/^(?:joey|wind|humidity|pressure|temperature)\b/i.test(t)) return false;
-  if(/^(?:[A-Za-z]\s+){3,}$/.test(t)) return false;             // runs of single letters
+  if(/^\d{8,}$/.test(t)) return false;                 // NEW: drop long numeric counters
+  if(/^(?:[A-Za-z]\s+){3,}$/.test(t)) return false;
   return true;
 }
 function scoreSegment(s){
-  const t=s.toLowerCase();
-  let score=0;
-  if(/\b[1-9]\d{5}\b/.test(t)) score+=50;                       // PIN
+  const t=s.toLowerCase(); let score=0;
+  if(/\b[1-9]\d{5}\b/.test(t)) score+=50;
   if(CITY_KEYS.some(k=>t.includes(k))) score+=25;
   for(const k of STREET_KEYS) if(new RegExp(`\\b${k}\\b`).test(t)) score+=5;
-  if(latinRatio(t)>0.7) score+=10;                              // English-dominant
+  if(latinRatio(t)>0.75) score+=10;                   // bias to clean English
   if(t.length>25) score+=6;
   return score;
 }
 
-/* Robust lat/lon extraction with OCR fixes + timezone guard */
+/* Robust lat/lon with timezone guard */
 function extractCoords(rawText){
-  let norm=String(rawText||"")
-    .replace(/\u00A0|\u2009|\u2002|\u2003/g," ")
-    .replace(/[°]/g,"")
-    .replace(/O/g,"0");
+  let norm=String(rawText||"").replace(/\u00A0|\u2009|\u2002|\u2003/g," ").replace(/[°]/g,"").replace(/O/g,"0");
+  norm=norm.replace(/(\d)[Il|]([0-9])/g,"$11$2").replace(/(\d)[Il|]([.,:]\d)/g,(m,a,b)=>`${a}1${b}`).replace(/(\d)[Ss]([0-9])/g,"$15$2").replace(/(\d)[Bb]([0-9])/g,"$18$2");
+  const cleanNum=s=>s.replace(/[,:\s]/g,"."); const numRe=/[+-]?\d{1,3}(?:[.,:]\d{2,7})/g;
 
-  // Fix common numeric confusions when between digits/decimal
-  norm=norm
-    .replace(/(\d)[Il|]([0-9])/g,"$11$2")
-    .replace(/(\d)[Il|]([.,:]\d)/g,(m,a,b)=>`${a}1${b}`)
-    .replace(/(\d)[Ss]([0-9])/g,"$15$2")
-    .replace(/(\d)[Bb]([0-9])/g,"$18$2");
-
-  const cleanNum=s=>s.replace(/[,:\s]/g,".");
-  const numRe=/[+-]?\d{1,3}(?:[.,:]\d{2,7})/g;
-
-  // Prefer explicit labels
   let lat="",lon="",m=norm.match(/Lat(?:itude)?[^0-9+-]*([+-]?\d{1,2}[.,:]\d{1,7})[^0-9+-]{0,40}Lon(?:g(?:itude)?)?[^0-9+-]*([+-]?\d{1,3}[.,:]\d{1,7})/i);
   if(m){ lat=cleanNum(m[1]); lon=cleanNum(m[2]); }
   if(!(lat&&lon)){ m=norm.match(/Lon(?:g(?:itude)?)?[^0-9+-]*([+-]?\d{1,3}[.,:]\d{1,7})[^0-9+-]{0,40}Lat(?:itude)?[^0-9+-]*([+-]?\d{1,2}[.,:]\d{1,7})/i); if(m){ lon=cleanNum(m[1]); lat=cleanNum(m[2]); } }
@@ -205,7 +262,6 @@ function extractCoords(rawText){
     return { lat: okLat(la)?String(la):"", lon: okLon(lo)?String(lo):"" };
   }
 
-  // Fallback: collect numeric candidates + prune time/timezone
   const matches=[...norm.matchAll(numRe)].map(mm=>{
     const raw=mm[0], val=parseFloat(cleanNum(raw)), index=mm.index??0;
     const ctx=norm.slice(Math.max(0,index-8), Math.min(norm.length,index+raw.length+8)).toUpperCase();
@@ -236,38 +292,28 @@ function extractCoords(rawText){
   return { lat:"", lon:"" };
 }
 
-/* Extract + clean address (stronger heuristic) */
+/* Stronger address picker */
 function extractAddress(raw){
-  const text=String(raw||"")
-    .replace(/\u00A0|\u2009|\u2002|\u2003/g," ")
-    .replace(/[|·•]+/g," ")
-    .replace(/\s{2,}/g," ")
-    .trim();
-
+  const text=String(raw||"").replace(/\u00A0|\u2009|\u2002|\u2003/g," ").replace(/[|·•]+/g," ").replace(/\s{2,}/g," ").trim();
   const lines=text.split(/\n+/).map(s=>s.trim()).filter(Boolean);
-  const latLineIdx=lines.findLastIndex?.(l=>/\bLat/i.test(l)) ?? lines.map((l,i)=>/\bLat/i.test(l)?i:-1).filter(x=>x>=0).pop() ?? lines.length;
-  const upTo=latLineIdx>=0?latLineIdx:lines.length;
+  const latIdx = (()=>{
+    for(let i=lines.length-1;i>=0;i--) if(/\bLat/i.test(lines[i])) return i;
+    return lines.length;
+  })();
+  const candidates=lines.slice(Math.max(0,latIdx-4), latIdx).filter(looksUsefulSeg).map(cleanAddressBasic);
 
-  // Take the last 3 lines before "Lat" (typical GPS Map Camera pattern)
-  const candidates=lines.slice(Math.max(0,upTo-4), upTo)
-    .filter(looksUsefulSeg)
-    .map(cleanAddressBasic);
-
-  // If “India” present earlier, cut from that to end of candidates
   let joined=candidates.join(", ");
   const indiaIdx=joined.toLowerCase().lastIndexOf("india");
   if(indiaIdx>0){ joined = joined.slice(0, indiaIdx + "india".length); }
 
-  // Split by commas, score, keep the best 4 meaningful segments
   const segs = joined.split(/\s*,\s*/).map(s=>s.trim()).filter(looksUsefulSeg);
   segs.sort((a,b)=>scoreSegment(b)-scoreSegment(a));
-  const picked = [...new Set(segs.slice(0,6))]; // dedupe
+  const picked = [...new Set(segs.slice(0,6))];
 
-  // Reorder to keep natural progression:  number/street -> locality -> city -> PIN -> India
   const orderScore = s=>{
     const t=s.toLowerCase();
     if(/\b(?:plot|flat|bldg|building|road|rd|lane|ln|marg)\b/.test(t)||/^\d+/.test(t)) return 10;
-    if(/\b(?:nagar|society|estate|midc|industrial|village|sector)\b/.test(t)) return 8;
+    if(/\b(?:nagar|society|estate|midc|industrial|village|sector|marol|andheri|santacruz|vakola|khar)\b/.test(t)) return 8;
     if(/\bmumbai\b/.test(t)) return 6;
     if(/\bmaharashtra\b/.test(t)) return 4;
     if(/\b[1-9]\d{5}\b/.test(t)) return 2;
@@ -276,38 +322,56 @@ function extractAddress(raw){
   };
   picked.sort((a,b)=>orderScore(b)-orderScore(a));
 
-  // Final polish
   let addr = picked.join(", ");
-  addr = addr.replace(/(?:\b[A-Za-z]\b\s*){3,}/g," ");      // kill runs of single letters
+  addr = addr.replace(/(?:\b[A-Za-z]\b\s*){3,}/g," ");
   addr = addr.replace(/\s{2,}/g," ").replace(/\s*,\s*/g,", ").replace(/,\s*,/g,", ").replace(/^\s*,\s*|\s*,\s*$/g,"");
-
-  // Ensure trailing “India” and one PIN if present
   const pin = text.match(/\b[1-9]\d{5}\b/);
   if(pin && !addr.includes(pin[0])) addr = addr ? `${addr}, ${pin[0]}` : pin[0];
   if(addr && !/,\s*India$/i.test(addr)) addr = `${addr}, India`;
-
   return addr;
 }
 
-/* Full parsing pipeline */
+/* ---------- Parsing wrapper ---------- */
 function parseAll(text){
   const raw=String(text||"").replace(/\u00A0|\u2009|\u2002|\u2003/g," ").replace(/[|·•]+/g," ").replace(/\s{2,}/g," ").trim();
-  const lines=raw.split(/\n+/).map(s=>s.trim()).filter(Boolean);
-
-  // Date & time
-  let date="",time="";
   const toIsoDate=s=>{ const m=s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/); if(!m) return ""; let [_,d,mo,y]=m; if(y.length===2) y=+y<50?"20"+y:"19"+y; return `${y}-${mo.padStart(2,"0")}-${d.padStart(2,"0")}`; };
   const to24h=s=>{ s=s.trim().toUpperCase(); const m=s.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/); if(!m) return ""; let h=+m[1],mi=m[2],ap=m[3]||""; if(ap==="PM"&&h<12) h+=12; if(ap==="AM"&&h===12) h=0; return `${String(h).padStart(2,"0")}:${mi}`; };
   const dt=raw.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}).{0,6}(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i);
-  if(dt){ date=toIsoDate(dt[1]); time=to24h(dt[2]); }
-
-  // Coords
+  const date=dt?toIsoDate(dt[1]):""; const time=dt?to24h(dt[2]):"";
   const { lat, lon } = extractCoords(raw);
-
-  // Address (new stronger extractor)
   const address = extractAddress(raw);
-
   return { lat, lon, address, date, time };
+}
+
+/* ---------- OCR with dynamic language ---------- */
+async function ensureV4(){
+  if(!window.Tesseract?.recognize){
+    await addScript("https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js");
+  }
+}
+async function ocrRecognize(url){
+  // quick prepass on downscaled strip (fast)
+  let langHint="eng";
+  try{
+    const bmp=await createImageBitmap(await (await fetch(url)).blob());
+    const c=document.createElement("canvas");
+    c.width=Math.max(1,Math.floor(bmp.width*0.3));
+    c.height=Math.max(1,Math.floor(bmp.height*0.3));
+    c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);
+    const strip=c.toDataURL("image/png");
+    try{
+      const probe=await Tesseract.recognize(strip,"eng",{ tessedit_pageseg_mode:6, preserve_interword_spaces:1 });
+      if(/[\u0900-\u097F]/.test(probe?.data?.text||"")) langHint="eng+hin+mar";
+    }catch{}
+  }catch{}
+  try{
+    const {data:{text}}=await Tesseract.recognize(url,langHint);
+    return text;
+  }catch{
+    await ensureV4();
+    const {data:{text}}=await Tesseract.recognize(url,langHint);
+    return text;
+  }
 }
 
 /* ---------- Redirect ---------- */
@@ -346,15 +410,16 @@ async function runPipeline(file){
     const dataUrl=reader.result; els.originalImg.src=dataUrl;
 
     setStatus("Optimising image…","warn");
-    const cropped=await cropOverlay(dataUrl); if(myRun!==state.activeRun) return; endStage(0);
+    const crop = await cropOverlay(dataUrl);   // {displayUrl, ocrUrl}
+    if(myRun!==state.activeRun) return;
+    endStage(0);
 
     startStage(1); setStatus("Running OCR…","warn");
-    els.overlayImg.src=cropped; els.overlayScanner.style.display="block";
+    els.overlayImg.src=crop.displayUrl; els.overlayScanner.style.display="block";
 
-    async function ocrV5(){ const {data:{text}}=await Tesseract.recognize(cropped,"eng+hin"); return text; }
-    async function ocrV4(){ if(!window.Tesseract?.recognize) await addScript("https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"); const {data:{text}}=await Tesseract.recognize(cropped,"eng+hin"); return text; }
-
-    let text=""; try{ text=await ocrV5(); }catch{ try{ text=await ocrV4(); }catch{ els.overlayScanner.style.display="none"; setStatus("OCR failed. Please Retry.","err"); onStageTimeout(1); return; } }
+    let text="";
+    try{ text=await ocrRecognize(crop.ocrUrl); }
+    catch{ els.overlayScanner.style.display="none"; setStatus("OCR failed. Please Retry.","err"); onStageTimeout(1); return; }
     els.overlayScanner.style.display="none"; endStage(1);
 
     startStage(2); setStatus("Parsing extracted text…","warn");
