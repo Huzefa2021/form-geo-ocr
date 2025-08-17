@@ -3,96 +3,101 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>MCGM | Abandoned Vehicles – Marshal Upload</title>
-  <link rel="icon" href="favicon.ico" />
+  <title>Municipal Corporation of Greater Mumbai – Marshal Upload</title>
+
+  <!-- UI unchanged: same classes/sections/labels -->
   <link rel="stylesheet" href="styles.css" />
+
+  <!-- Tesseract (browser) -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+  <!-- Config: where GeoJSONs live -->
+  <script>
+    window.GEO = {
+      wards:  "data/wards.geojson",
+      beats:  "data/beats.geojson",
+      police: "data/police_jurisdiction.geojson"
+    };
+    // Cropping: take bottom band (fraction of height)
+    window.CROP_FRACTION = 0.36;  // 36% from bottom; adjust if needed
+  </script>
 </head>
 <body>
-  <!-- Header (sticky + saffron underline) -->
-  <header class="hdr">
+  <header class="topbar">
     <div class="brand">
-      <img class="logo-bmc" src="https://www.mcgm.gov.in/com.mcgm.newframework/images/logo_V1.png" alt="MCGM">
-      <div class="txt">
-        <div class="t1">Municipal Corporation of Greater Mumbai</div>
-        <div class="t2">Abandoned Vehicles – Identification &amp; Pre-Notice (Marshal Upload)</div>
+      <img src="https://www.mcgm.gov.in/com.mcgm.newframework/images/logo_V1.png" alt="BMC" class="logo">
+      <div class="titles">
+        <h1>Municipal Corporation of Greater Mumbai</h1>
+        <h2>Abandoned Vehicles – Identification &amp; Pre-Notice (Marshal Upload)</h2>
       </div>
     </div>
-    <div class="tools">
-      <span class="pill">OCR: Auto</span>
-      <button id="btnReset" class="btn ghost">Reset</button>
-      <img class="logo-cres" src="data/Crescendo Logo.png" alt="Crescendo">
+    <div class="actions">
+      <select id="ocrMode" aria-label="OCR Mode">
+        <option value="auto" selected>OCR: Auto</option>
+        <option value="local">OCR: Local (Tesseract)</option>
+      </select>
+      <button id="btnReset" class="btn">Reset</button>
     </div>
   </header>
 
-  <!-- Milestones + progress + elapsed -->
+  <div class="saffron-line top"></div>
+
   <section class="rail">
-    <ul id="steps" class="steps">
-      <li>Upload</li><li>OCR</li><li>Parse</li><li>GeoJSON</li><li>Review</li><li>Redirect</li>
-    </ul>
-    <div class="bar"><span id="bar"></span></div>
-    <div class="rail-under">
-      <span id="status" class="status">Initializing…</span>
-      <span id="times" class="times">Upload — 0.0s • OCR — 0.0s • Parse — 0.0s • GeoJSON — 0.0s • Review — 0.0s • Redirect — 0.0s</span>
-    </div>
-    <div id="cdn" class="cdn">CDN: checking…</div>
+    <div class="chip active" id="stepUpload">Upload</div>
+    <div class="chip" id="stepOcr">OCR</div>
+    <div class="chip" id="stepParse">Parse</div>
+    <div class="chip" id="stepGeo">GeoJSON</div>
+    <div class="chip" id="stepReview">Review</div>
   </section>
 
-  <!-- Breadcrumbs -->
-  <nav class="crumbs">Home › Abandoned Vehicles › Marshal Upload</nav>
+  <p id="timings" class="timings">Initializing…</p>
 
-  <!-- Main content -->
-  <main class="wrap">
-    <section class="grid">
-      <!-- Left column -->
-      <div>
-        <div class="card" id="cardDrop">
-          <h3>Upload Photo</h3>
-          <div id="drop" class="drop" tabindex="0">
-            <div><strong>Tap to choose image</strong><div>or drag &amp; drop (JPG/PNG from GPS Map Camera)</div></div>
-            <input id="file" type="file" accept="image/*" capture="environment" />
-          </div>
-        </div>
-
-        <div class="card hidden" id="cardOrig">
-          <h3>Original Photo (25%)</h3>
-          <div class="img center original25"><img id="imgOrig" alt=""></div>
-        </div>
-
-        <div class="card hidden" id="cardOverlay">
-          <h3>Cropped Overlay (GPS text)</h3>
-          <div class="img center overlay">
-            <img id="imgOverlay" alt="">
-            <div id="scanner" class="scanner"></div>
-          </div>
-        </div>
+  <main class="grid">
+    <section class="panel">
+      <h3>Original Photo (25%)</h3>
+      <div id="drop" class="drop">
+        <input id="file" type="file" accept="image/*" />
+        <p>Tap to choose image<br/><small>or drag &amp; drop (JPG/PNG from GPS Map Camera)</small></p>
       </div>
-
-      <!-- Right column -->
-      <div>
-        <div class="card">
-          <h3>Results</h3>
-          <div id="res"></div>
-          <div id="resNote" class="note">Results will be populated post processing.</div>
-        </div>
+      <div id="originalWrap" class="imgWrap hidden">
+        <img id="originalImg" alt="Original" />
       </div>
     </section>
 
-    <div id="redirect" class="redir hidden"></div>
+    <section class="panel">
+      <h3>Results</h3>
+      <dl class="results">
+        <dt>Date</dt><dd id="outDate">—</dd>
+        <dt>Time</dt><dd id="outTime">—</dd>
+        <dt>Latitude</dt><dd id="outLat">—</dd>
+        <dt>Longitude</dt><dd id="outLon">—</dd>
+        <dt>Address</dt><dd id="outAddr">—</dd>
+        <dt>Ward</dt><dd id="outWard">—</dd>
+        <dt>Beat No.</dt><dd id="outBeat">—</dd>
+        <dt>Police Station</dt><dd id="outPS">—</dd>
+      </dl>
+    </section>
+
+    <section class="panel">
+      <h3>Cropped Overlay (GPS text)</h3>
+      <canvas id="cropCanvas" class="cropCanvas"></canvas>
+    </section>
   </main>
 
-  <!-- Footer (centered + saffron accents) -->
-  <footer class="ftr">
-    <div>Developed by <strong>Crescendo Innovative Solutions LLP</strong> · Admin: <strong>Huzefa Fakhruddin</strong> — <a href="mailto:Care@crescendoits.com">Care@crescendoits.com</a></div>
-    <div>© 2025 Municipal Corporation of Greater Mumbai (MCGM) — <a href="https://www.mcgm.gov.in" target="_blank" rel="noopener">www.mcgm.gov.in</a> <span class="build">| Build: <span id="ver">—</span></span></div>
+  <div id="alert" class="alert hidden"></div>
+
+  <div class="saffron-line bottom"></div>
+
+  <footer class="footer">
+    <p>
+      <strong>Developed by Crescendo Innovative Solutions LLP</strong> ·
+      Admin: <a href="mailto:Care@crescendoits.com" class="saffron">Care@crescendoits.com</a> ·
+      © 2025 Municipal Corporation of Greater Mumbai (MCGM) —
+      <a href="https://www.mcgm.gov.in" target="_blank">www.mcgm.gov.in</a>
+      <span class="build">Build: v2025.08.17.Prod.v11</span>
+    </p>
   </footer>
 
-  <!-- Libraries -->
-  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
-  <!-- keep this line to allow OpenCV preprocessing if available -->
-  <script async src="https://docs.opencv.org/4.x/opencv.js" onload="window.__cvLoaded=true" onerror="window.__cvLoaded=false"></script>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-
-  <!-- App -->
   <script src="app.js"></script>
 </body>
 </html>
