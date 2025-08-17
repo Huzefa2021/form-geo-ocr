@@ -5,7 +5,7 @@
 <title>MCGM | Abandoned Vehicles – Marshal Upload Portal</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 
-<!-- Inline favicon (no 404s) -->
+<!-- Inline favicon to avoid 404 -->
 <link rel="icon" type="image/svg+xml"
   href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="%230b5aa3"/><stop offset="1" stop-color="%23ff9933"/></linearGradient></defs><rect width="64" height="64" rx="12" fill="url(%23g)"/><circle cx="32" cy="32" r="16" fill="white" opacity=".9"/></svg>'>
 
@@ -103,12 +103,36 @@ a:hover{text-decoration:underline}
 .v{font-family:ui-monospace,Menlo,Consolas,monospace; color:#1b3d62; word-break:break-word}
 @media (min-width:600px){.kv{grid-template-columns:200px 1fr}}
 
+/* Modal system - hidden by default */
+.modal-backdrop{
+  display:none; position:fixed; inset:0;
+  background:rgba(13,36,56,.55);
+  backdrop-filter: blur(2px);
+  z-index:3000;
+  align-items:center; justify-content:center;
+}
+.modal{
+  width:min(520px, calc(100vw - 32px));
+  background:#fff; color:#0d2438;
+  border:1px solid var(--line);
+  border-radius:12px;
+  box-shadow:var(--shadow-float);
+  overflow:hidden;
+}
+.m-hdr{padding:12px 14px; font-weight:700; background:#f6f9ff; border-bottom:1px solid var(--line); color:#0f3468}
+.m-hdr.m-err{background:#fff0f0; color:#842029}
+.m-body{padding:14px}
+.m-actions{display:flex; gap:8px; justify-content:flex-end; padding:12px 14px; border-top:1px solid var(--line)}
+.btn{border:1px solid #cfe0f3; background:#f7fbff; color:#0c3963; border-radius:8px; padding:8px 12px; cursor:pointer}
+.btn-primary{background:#0b5aa3; border-color:#0b5aa3; color:#fff}
+.btn-danger{background:#dc3545; border-color:#dc3545; color:#fff}
+
 .footer{margin-top:16px; background:#0a4a87; color:#e9f2fb; border-top:3px solid var(--mcgm-orange)}
 .footer-inner{max-width:1180px; margin:0 auto; padding:14px; font-size:clamp(12px,2vw,13px); text-align:center}
 .footer-inner a{color:#ffd166; font-weight:600}
 </style>
 
-<!-- Turf (spatial) -->
+<!-- Turf (spatial ops) -->
 <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.2.0/turf.min.js"></script>
 </head>
 <body>
@@ -204,8 +228,8 @@ a:hover{text-decoration:underline}
   </div>
 </div>
 
-<!-- ===== MODALS ===== -->
-<div id="modalBackdrop" class="modal-backdrop" role="dialog" aria-modal="true">
+<!-- ===== MODALS (hidden by default) ===== -->
+<div id="modalBackdrop" class="modal-backdrop" style="display:none" role="dialog" aria-modal="true">
   <div class="modal">
     <div class="m-hdr">Outside MCGM Boundaries — Not allowed</div>
     <div class="m-body">The detected coordinates are not inside MCGM ward polygons. You cannot submit this entry.</div>
@@ -216,7 +240,7 @@ a:hover{text-decoration:underline}
   </div>
 </div>
 
-<div id="timeoutBackdrop" class="modal-backdrop" role="dialog" aria-modal="true">
+<div id="timeoutBackdrop" class="modal-backdrop" style="display:none" role="dialog" aria-modal="true">
   <div class="modal">
     <div class="m-hdr m-err" id="timeoutTitle">Stage Timed Out</div>
     <div class="m-body" id="timeoutBody">
@@ -304,7 +328,7 @@ const state={
   countdownTimer:null
 };
 
-/* ui helpers */
+/* -------- UI helpers -------- */
 function setStatus(m,c){els.status.className='status '+(c||''); els.status.textContent=m;}
 function kvRow(id,label,value){let row=document.getElementById(id); if(!row){row=document.createElement('div'); row.className='kv'; row.id=id; row.innerHTML=`<div class="k">${label}</div><div class="v">—</div>`; els.results.appendChild(row);} if(value!==undefined&&value!==null) row.querySelector('.v').textContent=String(value||'—');}
 function render(){const d=state.data; kvRow('row-date','Date',d.date); kvRow('row-time','Time',d.time); kvRow('row-lat','Latitude',d.lat); kvRow('row-lon','Longitude',d.lon); kvRow('row-addr','Address',d.address); kvRow('row-ward','Ward',d.WARD); kvRow('row-beat','Beat No.',d.BEAT_NO); kvRow('row-ps','Police Station',d.PS_NAME);}
@@ -317,7 +341,7 @@ function startStage(i){if(state.timedOut) return; for(let k=0;k<i;k++){if(state.
 function endStage(i){if(state.stageStart[i]!==null&&state.stageElapsed[i]===0) state.stageElapsed[i]=Date.now()-state.stageStart[i]; clearTimeout(state.stageTimeouts[i]); updateTimes();}
 function onStageTimeout(i){if(state.stageElapsed[i]>0||state.timedOut) return; state.timedOut=true; els.timeoutBackdrop.style.display='flex'; els.timeoutTitle.textContent=`Stage Timed Out — ${["Upload","OCR","Parse","GeoJSON","Review","Redirect"][i]}`;}
 
-/* ===== GeoJSON: bbox-indexed + key-agnostic + nearest fallback ===== */
+/* -------- GeoJSON: bbox-indexed + key-agnostic + nearest fallback -------- */
 function indexFC(fc){const items=(fc.features||[]).map(f=>({f,b:turf.bbox(f)})); return {items};}
 function inBBox(pt,bb){return pt[0]>=bb[0]&&pt[0]<=bb[2]&&pt[1]>=bb[1]&&pt[1]<=bb[3];}
 function firstProp(props, keys){for(const k of keys){const v=props?.[k]; if(v!==undefined && v!==null && String(v).trim()!=="") return String(v).trim();} return "";}
@@ -368,7 +392,7 @@ function lookup(lat, lon){
   return {WARD:ward, BEAT_NO:beat, PS_NAME:ps};
 }
 
-/* ===== Image crop for OCR ===== */
+/* -------- Image crop for OCR -------- */
 async function cropOverlay(dataURL){
   const blob=await (await fetch(dataURL)).blob();
   const bmp=await createImageBitmap(blob);
@@ -386,7 +410,7 @@ async function cropOverlay(dataURL){
   return c.toDataURL('image/png');
 }
 
-/* ===== Coord helpers & parsing ===== */
+/* -------- Coord helpers & parsing -------- */
 function normalizeDigits(s){
   return String(s||"")
     .replace(/(\d)\s*[:·•]\s*(\d)/g,'$1.$2')
@@ -440,7 +464,7 @@ function parseAll(text){
   return {lat,lon,address,date,time};
 }
 
-/* redirect */
+/* -------- Redirect -------- */
 function startRedirectCountdown(sec){
   clearInterval(state.countdownTimer);
   els.redirectNote.style.display='block';
@@ -450,7 +474,7 @@ function startRedirectCountdown(sec){
   els.redirectNote.onclick=(e)=>{if(e.target && e.target.id==='cancelRedirect'){e.preventDefault(); clearInterval(state.countdownTimer); els.redirectNote.innerHTML=`<button id="openFormNow" class="btn">Open Google Form now</button>`; document.getElementById('openFormNow').onclick=()=>window.location.href=buildPrefillURL();}};
 }
 
-/* upload wiring + reset */
+/* -------- Upload wiring + reset -------- */
 els.drop.addEventListener('click',()=>els.file.click());
 els.drop.addEventListener('dragover',e=>{e.preventDefault(); els.drop.style.borderColor="#9ec5ff";});
 els.drop.addEventListener('dragleave',()=>{els.drop.style.borderColor="#cfe0f3";});
@@ -462,7 +486,7 @@ els.modalReset.addEventListener('click',()=>location.reload());
 els.timeoutRetry.addEventListener('click',()=>location.reload());
 els.timeoutClose.addEventListener('click',()=>els.timeoutBackdrop.style.display='none');
 
-/* pipeline */
+/* -------- Pipeline -------- */
 async function runPipeline(file){
   const myRun=++state.activeRun;
   els.dropCard.style.display='none';
@@ -527,21 +551,21 @@ async function runPipeline(file){
   reader.readAsDataURL(file);
 }
 
-/* timing/steps UI */
-function fmt(ms){return(ms>0&&isFinite(ms))?(ms/1000).toFixed(1)+'s':'0.0s';}
-function currentStageIndex(){for(let i=0;i<6;i++){if(state.stageStart[i]!==null&&state.stageElapsed[i]===0) return i;} for(let i=5;i>=0;i--) if(state.stageElapsed[i]>0) return Math.min(i+1,5); return 0;}
-function updateTimes(){const names=["Upload","OCR","Parse","GeoJSON","Review","Redirect"]; els.stageTimes.textContent=names.map((n,i)=>{const run=state.stageStart[i]!==null&&i===currentStageIndex(); const v=run?(Date.now()-state.stageStart[i]):state.stageElapsed[i]; return `${n} — ${fmt(v)}`;}).join(' • ');}
-function startStage(i){if(state.timedOut) return; for(let k=0;k<i;k++){if(state.stageStart[k]!==null&&state.stageElapsed[k]===0) endStage(k);} state.stageStart[i]=Date.now(); applyChips(i); if(!state.stageTicker) state.stageTicker=setInterval(updateTimes,200); clearTimeout(state.stageTimeouts[i]); state.stageTimeouts[i]=setTimeout(()=>onStageTimeout(i),STAGE_LIMITS[i]);}
-function endStage(i){if(state.stageStart[i]!==null&&state.stageElapsed[i]===0) state.stageElapsed[i]=Date.now()-state.stageStart[i]; clearTimeout(state.stageTimeouts[i]); updateTimes();}
-function applyChips(i){els.ms.forEach((chip,idx)=>{chip.classList.remove('pending','active','done'); if(idx<i) chip.classList.add('done'); else if(idx===i) chip.classList.add('active'); else chip.classList.add('pending');}); els.bar.style.width=Math.max(0,Math.min(100,(i/5)*100))+'%';}
-function onStageTimeout(i){if(state.stageElapsed[i]>0||state.timedOut) return; state.timedOut=true; els.timeoutBackdrop.style.display='flex'; els.timeoutTitle.textContent=`Stage Timed Out — ${["Upload","OCR","Parse","GeoJSON","Review","Redirect"][i]}`;}
-
-/* bootstrap */
+/* -------- Boot -------- */
 (async()=>{
-  try{await loadGeo(); setStatus("Maps loaded. Upload an image to begin.","ok");}
-  catch(e){console.error(e); setStatus("Could not load GeoJSON (check /data paths).","err");}
+  try{
+    // make sure modals are hidden on first paint
+    if(els.modalBackdrop) els.modalBackdrop.style.display='none';
+    if(els.timeoutBackdrop) els.timeoutBackdrop.style.display='none';
+
+    await loadGeo();
+    setStatus("Maps loaded. Upload an image to begin.","ok");
+  }catch(e){
+    console.error(e);
+    setStatus("Could not load GeoJSON (check /data paths).","err");
+  }
   updateTimes();
-  const vEl=document.getElementById('appVersion'); if(vEl){ vEl.textContent='v2025.08.17'; }
+  const vEl=document.getElementById('appVersion'); if(vEl) vEl.textContent='v2025.08.17';
 })();
 </script>
 </body>
