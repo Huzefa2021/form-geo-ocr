@@ -1,6 +1,6 @@
 /* =========================================================
    MCGM – Marshal Upload Portal : Application Script (app.js)
-   Build: v2025.08.17.Prod.v8 (OCR mode toggle)
+   Build: v2025.08.17.Prod.v9 (classic look)
    ========================================================= */
 
 /* ---------- Tiny DOM util ---------- */
@@ -30,7 +30,7 @@ const ENTRY={
   address:"entry.1188611077", police:"entry.1555105834"
 };
 const STAGE_LIMITS=[20000,90000,12000,15000,45000,20000];
-const BUILD="v2025.08.17.Prod.v8";
+const BUILD="v2025.08.17.Prod.v9";
 const MUMBAI_BBOX=[72.60,18.80,73.20,19.50];
 
 /* ---------- OCR Mode (feature flag) ---------- */
@@ -161,11 +161,9 @@ function enhanceWithCV(canvas){
     const bin2 = new cv.Mat(); // Otsu
     cv.threshold(blur, bin2, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
 
-    // choose whitest
     const m1 = cv.mean(bin1)[0], m2 = cv.mean(bin2)[0];
     let best = m1>=m2 ? bin1 : bin2;
 
-    // Ensure white background using MEDIAN
     const hist = new cv.Mat();
     cv.calcHist([best], [0], new cv.Mat(), hist, [256], [0,256]);
     let cum=0, medianIdx=0, total=cv.countNonZero(best);
@@ -203,7 +201,6 @@ function enhanceWithCanvas(canvas){
 }
 /* Returns {displayUrl, ocrUrl} */
 async function cropOverlay(dataURL){
-  // Wider sweep – auto picks clearest
   const bands=[0.45,0.40,0.36,0.32];
   let best=null, bestMean=-1;
   for(const f of bands){
@@ -219,10 +216,10 @@ async function cropOverlay(dataURL){
   return best;
 }
 
-/* ---------- Address & Coordinates (hardened) ---------- */
+/* ---------- Address & Coordinates ---------- */
 function cleanAddressBasic(a){
   a=String(a||"");
-  a=a.replace(/\b[\w]{3,}\+[\w]{2,}\b/gi," ");                 // plus-codes
+  a=a.replace(/\b[\w]{3,}\+[\w]{2,}\b/gi," ");
   a=a.replace(/(?:GPS|Map|Camera|Wind|Humidity|Pressure|Temperature|Google).*/i," ");
   a=a.replace(/[^0-9A-Za-z\u0900-\u097F ,./\-]/g," ");
   a=a.replace(/\s{2,}/g," ").replace(/\s*,\s*/g,", ").replace(/,\s*,/g,", ").replace(/^\s*,\s*|\s*,\s*$/g,"");
@@ -236,7 +233,7 @@ function looksUsefulSeg(s){
   const t=s.trim();
   if(!t) return false;
   if(/^(?:joey|wind|humidity|pressure|temperature)\b/i.test(t)) return false;
-  if(/^\d{8,}$/.test(t)) return false;                 // drop long numeric counters
+  if(/^\d{8,}$/.test(t)) return false;
   if(/^(?:[A-Za-z]\s+){3,}$/.test(t)) return false;
   return true;
 }
@@ -245,7 +242,7 @@ function scoreSegment(s){
   if(/\b[1-9]\d{5}\b/.test(t)) score+=50;
   if(CITY_KEYS.some(k=>t.includes(k))) score+=25;
   for(const k of STREET_KEYS) if(new RegExp(`\\b${k}\\b`).test(t)) score+=5;
-  if(latinRatio(t)>0.75) score+=10;                   // bias to clean English
+  if(latinRatio(t)>0.75) score+=10;
   if(t.length>25) score+=6;
   return score;
 }
@@ -361,7 +358,6 @@ async function ocrRecognize(url){
 
   if(mode==="indic"){ langHint="eng+hin+mar"; }
   else if(mode==="auto"){
-    // quick prepass on downscaled strip
     try{
       const bmp=await createImageBitmap(await (await fetch(url)).blob());
       const c=document.createElement("canvas");
@@ -374,7 +370,7 @@ async function ocrRecognize(url){
         if(/[\u0900-\u097F]/.test(probe?.data?.text||"")) langHint="eng+hin+mar";
       }catch{}
     }catch{}
-  } // else ENG only
+  }
 
   try{
     const {data:{text}}=await Tesseract.recognize(url,langHint);
@@ -409,7 +405,6 @@ function bindDropzone(){
   fi.addEventListener("change",(e)=>{ const f=e.target.files?.[0]; if(!f) return; if(!isAllowedImage(f)){ showModal("Unsupported file","Only image files (JPG, PNG, WEBP, HEIC/HEIF) are allowed."); fi.value=""; return; } const tok=tokenOf(f); if(state.lastPickToken===tok) return; state.lastPickToken=tok; runPipeline(f); });
   $("#btnReset").onclick=()=>location.reload();
 
-  // OCR mode init & change
   els.ocrMode.value=getOCRMode();
   els.ocrMode.addEventListener("change",()=>{
     setOCRMode(els.ocrMode.value);
@@ -468,9 +463,18 @@ async function runPipeline(file){
 
 /* ---------- Boot ---------- */
 (async ()=>{
-  initResultSkeleton(); bindDropzone(); els.appVersion.textContent=BUILD;
+  initResultSkeleton();
+  bindDropzone();
+  els.appVersion.textContent=BUILD;
+
   await loadOCR();
-  try{ await loadGeo(); setStatus(`Maps loaded. W:${state.counts.wards} • B:${state.counts.beats} • PS:${state.counts.police}. Upload an image to begin.`,"ok"); }
-  catch{ setStatus("Could not load GeoJSON (check /data paths & filenames).","err"); }
+  try{
+    await loadGeo();
+    setStatus(`Maps loaded. W:${state.counts.wards} • B:${state.counts.beats} • PS:${state.counts.police}. Upload an image to begin.`,"ok");
+  }catch{
+    setStatus("Could not load GeoJSON (check /data paths & filenames).","err");
+  }
+
   updateTimes();
+  applyChips(0);        // classic: show "Upload" active on load
 })();
