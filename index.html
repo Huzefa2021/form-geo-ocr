@@ -5,6 +5,10 @@
   <title>MCGM | Abandoned Vehicles – Marshal Upload Portal</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 
+  <!-- Zero-404 favicon (inline SVG) -->
+  <link rel="icon" type="image/svg+xml"
+        href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="%230b5aa3"/><stop offset="1" stop-color="%23ff9933"/></linearGradient></defs><rect width="64" height="64" rx="12" fill="url(%23g)"/><circle cx="32" cy="32" r="16" fill="white" opacity=".9"/></svg>'>
+
   <!-- Perf: preconnect to CDN for Tesseract assets -->
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="preconnect" href="https://unpkg.com" crossorigin>
@@ -370,13 +374,11 @@ const GEOJSON_POLICE_URL = "./data/police_jurisdiction.geojson";
 /* ========= CDN endpoints ========= */
 const CDN_PRIMARY = {
   name: "jsDelivr",
-  workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
   corePath:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@5',
   langPath:   'https://cdn.jsdelivr.net/npm/@tesseract.js-data'
 };
 const CDN_FALLBACK = {
   name: "unpkg",
-  workerPath: 'https://unpkg.com/tesseract.js@5/dist/worker.min.js',
   corePath:   'https://unpkg.com/tesseract.js-core@5',
   langPath:   'https://unpkg.com/@tesseract.js-data'
 };
@@ -447,10 +449,7 @@ const state = {
 };
 
 /* ========= Helpers ========= */
-// Normalize value to array (Tesseract-friendly)
-const arr = (x) => Array.isArray(x) ? x : [x];
-
-/* ========= UI Helpers ========= */
+const arr = (x) => Array.isArray(x) ? x : [x];  // normalize to array (used by OCR paths)
 function setStatus(msg, cls){ els.status.className = 'status ' + (cls||''); els.status.textContent = msg; }
 function kvRow(id, label, value){
   let row = document.getElementById(id);
@@ -534,8 +533,8 @@ function onStageTimeout(i){
   state.timedOut = true;
   const name = STAGE_NAMES[i];
   const limit = (STAGE_LIMITS[i]/1000).toFixed(0)+'s';
-  els.timeoutTitle.textContent = `Stage Timed Out — ${name}`;
-  els.timeoutBody.innerHTML = `
+  document.getElementById('timeoutTitle').textContent = `Stage Timed Out — ${name}`;
+  document.getElementById('timeoutBody').innerHTML = `
     The <strong>${name}</strong> stage exceeded the maximum allowed time of <strong>${limit}</strong>.<br/><br/>
     <strong>Reason (typical):</strong> network slowness, large/corrupted image, or blocked resources (CDN).<br/><br/>
     <strong>Admin:</strong> Huzefa Fakhruddin — <a href="mailto:Care@crescendoits.com">Care@crescendoits.com</a>
@@ -570,7 +569,6 @@ function startRedirectCountdown(sec){
 
 /* ========= Modals ========= */
 function showOutsideModal(){ els.modalBackdrop.style.display = 'flex'; }
-function hideOutsideModal(){ els.modalBackdrop.style.display = 'none'; }
 
 /* ========= FAST OCR: crop bottom overlay ========= */
 async function cropOverlay(dataURL) {
@@ -635,7 +633,7 @@ function lookup(lat, lon){
   };
 }
 
-/* ========= CDN CHECK ========= */
+/* ========= CDN CHECK (core + lang only) ========= */
 async function probe(url){
   try{
     const res = await fetch(url, { method:'GET', headers:{ 'Range':'bytes=0-15' }, cache:'no-store', mode:'cors' });
@@ -643,8 +641,6 @@ async function probe(url){
   }catch(e){ return false; }
 }
 async function checkCDN(cdn){
-  const okWorker = await probe(cdn.workerPath);
-
   const cores = arr(cdn.corePath);
   let okCore = false;
   for (const base of cores) {
@@ -652,14 +648,12 @@ async function checkCDN(cdn){
     const b = a ? true : await probe(base + '/tesseract-core-simd.wasm.js');
     if (a || b) { okCore = true; break; }
   }
-
   const langs = arr(cdn.langPath);
   let okLang = false;
   for (const base of langs) {
     if (await probe(base + '/eng/4.0.0/eng.traineddata.gz')) { okLang = true; break; }
   }
-
-  return okWorker && okCore && okLang;
+  return okCore && okLang;
 }
 function showCDNModal(msg){
   els.cdnBody.innerHTML = `
@@ -681,7 +675,7 @@ async function initCDN(){
     els.cdnPill.textContent = `CDN: Unreachable (${CDN_CURRENT.name})`;
     els.cdnPill.className = 'cdn-pill err';
     setStatus("CDN blocked or offline. Open the CDN dialog.", "err");
-    showCDNModal(`Could not reach ${CDN_CURRENT.name} endpoints for worker/core/lang assets.`);
+    showCDNModal(`Could not reach ${CDN_CURRENT.name} core/lang assets.`);
   }
 }
 
@@ -719,7 +713,7 @@ async function runPipeline(file){
     // End Upload
     endStage(0);
 
-    // Stage 2: OCR
+    // Stage 2: OCR (main thread)
     startStage(1);
     setStatus("Running OCR…", "warn");
     state.croppedUrl = cropped;
@@ -727,26 +721,20 @@ async function runPipeline(file){
     els.overlayScanner.style.display = "block";
 
     try {
-      // Worker WITHOUT logger; core/lang paths as arrays (fixes x.map)
-      const worker = await Tesseract.createWorker({
-        workerPath: CDN_CURRENT.workerPath,
-        corePath:   arr(CDN_CURRENT.corePath),
-        langPath:   arr(CDN_CURRENT.langPath)
-      });
-      await worker.loadLanguage('eng');
-      await worker.initialize('eng');
-      await worker.setParameters({
-        tessedit_pageseg_mode: 6,
-        tessedit_char_whitelist:
-          "0123456789:/.-,+() APMapm°'\"IndiaMaharashtraMumbaiAndheriVersovaRoadRdWestEastNorthSouth",
-        user_defined_dpi: "200"
-      });
-
-      const { data: { text } } = await worker.recognize(state.croppedUrl);
-      await worker.terminate();
+      const { data: { text} } = await Tesseract.recognize(
+        state.croppedUrl, 'eng',
+        {
+          corePath: arr(CDN_CURRENT.corePath),
+          langPath: arr(CDN_CURRENT.langPath),
+          logger: m => {
+            if (m?.status) {
+              const pct = Math.round((m.progress || 0) * 100);
+              setStatus(`OCR: ${m.status} ${pct}%`, "warn");
+            }
+          }
+        }
+      );
       els.overlayScanner.style.display = "none";
-
-      // End OCR
       endStage(1);
 
       // Stage 3: Parse
@@ -769,65 +757,22 @@ async function runPipeline(file){
       } else { state.outside = true; }
       endStage(3);
 
-      // Outside?
       if(state.outside){
         setStatus("Outside MCGM Boundaries — Not allowed.", "err");
-        showOutsideModal();
-        return;
+        showOutsideModal(); return;
       }
 
       // Stage 5: Review
-      startStage(4);
-      setStatus("Ready. Review the results.", "ok");
-      endStage(4);
+      startStage(4); setStatus("Ready. Review the results.", "ok"); endStage(4);
 
       // Stage 6: Redirect
-      startStage(5);
-      startRedirectCountdown(5);
+      startStage(5); startRedirectCountdown(5);
 
     } catch (e) {
-      console.error("Worker OCR failed. Trying fallback:", e);
+      console.error("OCR failed:", e);
       els.overlayScanner.style.display = "none";
-
-      // Fallback: single-threaded recognize (logger OK here; no worker boundary)
-      try {
-        const { data: { text } } = await Tesseract.recognize(
-          state.croppedUrl, 'eng',
-          {
-            corePath: arr(CDN_CURRENT.corePath),
-            langPath: arr(CDN_CURRENT.langPath),
-            logger: m => { /* optional progress on main thread */ }
-          }
-        );
-        endStage(1); // mark OCR done after fallback
-
-        startStage(2);
-        setStatus("Parsing extracted text…", "warn");
-        Object.assign(state.data, parseAll(text));
-        renderIncremental();
-        endStage(2);
-
-        startStage(3);
-        setStatus("GeoJSON lookup…", "warn");
-        let g = {WARD:"",BEAT_NO:"",PS_NAME:""}; state.outside = false;
-        if(state.data.lat && state.data.lon){
-          g = lookup(state.data.lat, state.data.lon);
-          Object.assign(state.data, {WARD:g.WARD, BEAT_NO:g.BEAT_NO, PS_NAME:g.PS_NAME});
-          renderIncremental();
-          if(!g.WARD){ state.outside = true; }
-        } else { state.outside = true; }
-        endStage(3);
-
-        if(state.outside){ setStatus("Outside MCGM Boundaries — Not allowed.", "err"); showOutsideModal(); return; }
-
-        startStage(4); setStatus("Ready. Review the results.", "ok"); endStage(4);
-        startStage(5); startRedirectCountdown(5);
-
-      } catch (e2) {
-        console.error("Fallback OCR failed:", e2);
-        setStatus("OCR could not complete. Tap Retry.", "err");
-        onStageTimeout(1);
-      }
+      setStatus("OCR could not complete. Tap Retry.", "err");
+      onStageTimeout(1);
     }
   };
   reader.readAsDataURL(file);
@@ -870,22 +815,22 @@ async function hardReset(){
     location.reload();
   }
 }
-els.btnReset.addEventListener('click', hardReset);
+document.getElementById('btnReset').addEventListener('click', hardReset);
 
 /* Modals */
-els.modalCancel.addEventListener('click', ()=>{ els.modalBackdrop.style.display='none'; });
-els.modalReset.addEventListener('click', ()=>{ els.modalBackdrop.style.display='none'; hardReset(); });
+document.getElementById('modalCancel').addEventListener('click', ()=>{ document.getElementById('modalBackdrop').style.display='none'; });
+document.getElementById('modalReset').addEventListener('click', ()=>{ document.getElementById('modalBackdrop').style.display='none'; hardReset(); });
 
-els.timeoutRetry.addEventListener('click', ()=>{ els.timeoutBackdrop.style.display='none'; hardReset(); });
-els.timeoutClose.addEventListener('click', ()=>{ els.timeoutBackdrop.style.display='none'; });
+document.getElementById('timeoutRetry').addEventListener('click', ()=>{ document.getElementById('timeoutBackdrop').style.display='none'; hardReset(); });
+document.getElementById('timeoutClose').addEventListener('click', ()=>{ document.getElementById('timeoutBackdrop').style.display='none'; });
 
-els.cdnRetry.addEventListener('click', async ()=>{ els.cdnBackdrop.style.display='none'; await initCDN(); });
-els.cdnUseFallback.addEventListener('click', async ()=>{
+document.getElementById('cdnRetry').addEventListener('click', async ()=>{ document.getElementById('cdnBackdrop').style.display='none'; await initCDN(); });
+document.getElementById('cdnUseFallback').addEventListener('click', async ()=>{
   CDN_CURRENT = {...CDN_FALLBACK};
-  els.cdnBackdrop.style.display='none';
+  document.getElementById('cdnBackdrop').style.display='none';
   await initCDN();
 });
-els.cdnClose.addEventListener('click', ()=>{ els.cdnBackdrop.style.display='none'; });
+document.getElementById('cdnClose').addEventListener('click', ()=>{ document.getElementById('cdnBackdrop').style.display='none'; });
 
 /* ========= Bootstrap ========= */
 (async ()=>{
@@ -897,7 +842,7 @@ els.cdnClose.addEventListener('click', ()=>{ els.cdnBackdrop.style.display='none
     setStatus("Could not load GeoJSON (check /data paths / CORS).", "err");
   }
   updateStageTimes();
-  await initCDN(); // 🔍 CDN check on load
+  await initCDN(); // 🔍 CDN check on load (core+lang)
 })();
 </script>
 </body>
