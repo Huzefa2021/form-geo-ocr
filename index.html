@@ -1,114 +1,149 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1, viewport-fit=cover"
-  />
-  <title>Municipal Corporation of Greater Mumbai — Marshal Upload</title>
-  <link rel="icon" href="favicon.ico" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Municipal Corporation of Greater Mumbai — Abandoned Vehicles (Marshal Upload)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css" />
-  <!-- Tesseract (OCR) -->
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
 </head>
+
 <body>
-  <!-- Header -->
-  <header class="app-header">
+  <header class="topbar">
     <div class="brand">
-      <img class="crest" src="data/mcgm-crest.png" alt="" />
-      <div class="brand-text">
+      <img src="logo.png" alt="MCGM Logo" class="logo" onerror="this.style.display='none'">
+      <div class="titles">
         <div class="title">Municipal Corporation of Greater Mumbai</div>
-        <div class="subtitle">
-          Abandoned Vehicles – Identification &amp; Pre-Notice (Marshal Upload)
-        </div>
+        <div class="subtitle">Abandoned Vehicles – Identification &amp; Pre-Notice (Marshal Upload)</div>
       </div>
     </div>
 
-    <div class="header-right">
-      <div class="badge cdn" id="cdn-badge">CDN: v5 (jsDelivr)</div>
-      <button id="btnReset" class="btn ghost">Reset</button>
-    </div>
+    <div class="actions">
+      <button class="pill action" type="button" disabled>
+        <span class="icon">⬆️</span><span>Upload</span>
+      </button>
+      <button class="pill action" type="button" disabled>
+        <span class="icon">🔎</span><span>OCR</span>
+      </button>
+      <button class="pill action" type="button" disabled>
+        <span class="icon">🧩</span><span>Parse</span>
+      </button>
+      <button class="pill action" type="button" disabled>
+        <span class="icon">🗺️</span><span>GeoJSON</span>
+      </button>
+      <button class="pill action" type="button" disabled>
+        <span class="icon">📝</span><span>Review</span>
+      </button>
+      <button class="pill action" type="button" disabled>
+        <span class="icon">➡️</span><span>Redirect</span>
+      </button>
 
-    <!-- saffron bottom line is via CSS -->
+      <div class="spacer"></div>
+
+      <label class="ocr-mode">
+        <span>OCR:</span>
+        <select id="ocrMode" disabled>
+          <option>Auto</option>
+        </select>
+      </label>
+
+      <button class="btn reset" data-action="reset" type="button">Reset</button>
+      <div class="cdn-badge">CDN: v5 (jsDelivr)</div>
+    </div>
+    <div class="saffron-line"></div>
   </header>
 
-  <!-- Stage pills + status (sticky, below header) -->
-  <section class="stage-wrap">
-    <div class="stage-pills">
-      <span id="st-upload" class="stage-pill is-pending" title="Upload">Upload</span>
-      <span id="st-ocr" class="stage-pill is-pending" title="OCR">OCR</span>
-      <span id="st-parse" class="stage-pill is-pending" title="Parse">Parse</span>
-      <span id="st-geo" class="stage-pill is-pending" title="GeoJSON">GeoJSON</span>
-      <span id="st-review" class="stage-pill is-pending" title="Review">Review</span>
-    </div>
-    <div id="stage-status" class="stage-status">Waiting for image…</div>
-    <div id="stage-times" class="stage-times">
-      Upload — 0.0s • OCR — 0.0s • Parse — 0.0s • GeoJSON — 0.0s • Review — 0.0s
-    </div>
+  <!-- Timing/status bar (below header) -->
+  <section class="statusbar">
+    <span class="time-badge" data-time="Upload">Upload — 0.0s</span>
+    <span class="dot">•</span>
+    <span class="time-badge" data-time="OCR">OCR — 0.0s</span>
+    <span class="dot">•</span>
+    <span class="time-badge" data-time="Parse">Parse — 0.0s</span>
+    <span class="dot">•</span>
+    <span class="time-badge" data-time="GeoJSON">GeoJSON — 0.0s</span>
+    <span class="dot">•</span>
+    <span class="time-badge" data-time="Review">Review — 0.0s</span>
+    <span class="dot">•</span>
+    <span class="time-badge" data-time="Redirect">Redirect — 0.0s</span>
+
+    <span class="right" data-progress="ocr"></span>
   </section>
 
-  <!-- Content -->
+  <!-- Stage pills -->
+  <section class="stages">
+    <span class="stage-pill pending" id="stage-upload"  title="Upload"><span class="icon">⬆️</span>Upload</span>
+    <span class="stage-pill pending" id="stage-ocr"      title="OCR"><span class="icon">🔎</span>OCR</span>
+    <span class="stage-pill pending" id="stage-parse"    title="Parse"><span class="icon">🧩</span>Parse</span>
+    <span class="stage-pill pending" id="stage-geojson"  title="GeoJSON"><span class="icon">🗺️</span>GeoJSON</span>
+    <span class="stage-pill pending" id="stage-review"   title="Review"><span class="icon">📝</span>Review</span>
+    <span class="stage-pill pending" id="stage-redirect" title="Redirect"><span class="icon">➡️</span>Redirect</span>
+  </section>
+
   <main class="container">
     <div class="grid">
-      <!-- Left column -->
+      <!-- Left Column -->
       <section class="card">
-        <div class="card-title">Original Photo (25%)</div>
-        <div id="dropZone" class="upload-box" tabindex="0" aria-label="Tap to choose image">
-          <div class="upload-box-inner">
-            <div class="hint-strong">Tap to choose image</div>
-            <div class="hint-sub">or drag &amp; drop (JPG/PNG from GPS Map Camera)</div>
+        <h3>Original Photo (25%)</h3>
+        <div id="dropzone" class="dropzone" title="Drop an image or click to choose">
+          <input id="fileInput" type="file" accept="image/*" hidden />
+          <div class="dz-instructions">
+            <div class="big-icon">🖼️</div>
+            <div class="dz-title">Tap to choose image</div>
+            <div class="dz-sub">or drag &amp; drop (JPG/PNG from GPS Map Camera)</div>
           </div>
-          <!-- Preview sits below the dashed area (keeps layout clean) -->
         </div>
-        <div class="thumb-holder">
-          <img id="origPreview" alt="Original preview" />
+        <div class="preview">
+          <img id="origPreview" alt="Original Preview (25%)"/>
         </div>
       </section>
 
-      <!-- Right column -->
+      <!-- Right Column -->
       <section class="card">
-        <div class="card-title">Results</div>
-        <dl class="kv">
-          <dt>Date</dt><dd id="res-date">—</dd>
-          <dt>Time</dt><dd id="res-time">—</dd>
-          <dt>Latitude</dt><dd id="res-lat">—</dd>
-          <dt>Longitude</dt><dd id="res-lon">—</dd>
-          <dt>Address</dt><dd id="res-addr">—</dd>
-          <dt>Ward</dt><dd id="res-ward">—</dd>
-          <dt>Beat No.</dt><dd id="res-beat">—</dd>
-          <dt>Police Station</dt><dd id="res-ps">—</dd>
+        <h3>Results</h3>
+        <dl class="results">
+          <div><dt>Date</dt>       <dd id="valDate">—</dd></div>
+          <div><dt>Time</dt>       <dd id="valTime">—</dd></div>
+          <div><dt>Latitude</dt>   <dd id="valLat">—</dd></div>
+          <div><dt>Longitude</dt>  <dd id="valLon">—</dd></div>
+          <div class="address-row"><dt>Address</dt>    <dd id="valAddr">—</dd></div>
+          <div><dt>Ward</dt>       <dd id="valWard">—</dd></div>
+          <div><dt>Beat No.</dt>   <dd id="valBeat">—</dd></div>
+          <div><dt>Police Station</dt> <dd id="valPS">—</dd></div>
         </dl>
       </section>
 
-      <!-- Cropped overlay -->
-      <section class="card">
-        <div class="card-title">Cropped Overlay (GPS text)</div>
-        <div class="thumb-holder">
-          <img id="cropPreview" alt="Cropped preview (GPS band)" />
+      <!-- Cropped Overlay -->
+      <section class="card span-2">
+        <h3>Cropped Overlay (GPS text)</h3>
+        <div class="preview">
+          <img id="cropPreview" alt="Cropped HUD Preview (50%)"/>
         </div>
       </section>
     </div>
   </main>
 
-  <!-- Hidden file input (JS uses it; ensures single chooser) -->
-  <input id="fileInput" type="file" accept="image/*" hidden />
-
-  <!-- Footer -->
-  <footer class="app-footer">
+  <div class="footer-gap"></div>
+  <div class="saffron-line saffron-footer"></div>
+  <footer class="footer">
     <div class="footer-inner">
-      <div class="left">
-        Developed by
-        <strong>Crescendo Innovative Solutions LLP</strong> · Admin:
-        <a class="accent" href="mailto:Care@crescendoits.com">Care@crescendoits.com</a>
-        · © 2025 Municipal Corporation of Greater Mumbai (MCGM) —
-        <a href="https://www.mcgm.gov.in" target="_blank" rel="noopener">www.mcgm.gov.in</a>
+      <div class="footer-line">
+        <strong>Developed by</strong> Crescendo Innovative Solutions LLP ·
+        <strong>Admin:</strong>
+        <a href="mailto:Care@crescendoits.com" class="saffron-link">Care@crescendoits.com</a>
       </div>
-      <div class="right">Build: v2025.08.17.Prod.v12</div>
+      <div class="footer-line">
+        © 2025 Municipal Corporation of Greater Mumbai (MCGM) — <a href="https://www.mcgm.gov.in" target="_blank" rel="noopener">www.mcgm.gov.in</a>
+        <span class="build">| Build: v2025.08.18.Prod</span>
+      </div>
     </div>
-    <!-- saffron top line is via CSS -->
   </footer>
 
+  <!-- Tesseract.js -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+  <!-- Your app -->
   <script src="app.js"></script>
 </body>
 </html>
