@@ -1,6 +1,7 @@
 /* =========================================================
    MCGM – Marshal Upload Portal : Stylesheet (styles.css)
    ========================================================= */
+
 :root{
   --blue:#0f4c81;
   --blue-dark:#0b3a62;
@@ -8,7 +9,7 @@
   --ok:#1c9c50;
   --warn:#f18f01;
   --err:#d63c3c;
-  --chip:#e9f2ff;
+  --chip:#eef5ff;
   --muted:#6b7c93;
   --bg:#f3f6fa;
   --card:#fff;
@@ -26,8 +27,8 @@ body{
 .app-header{
   position:sticky; top:0; z-index:1000;
   display:flex; align-items:center; justify-content:space-between;
-  padding:.5rem 1rem; background:var(--blue);
-  color:#fff; box-shadow:0 6px 14px rgba(0,0,0,.15);
+  padding:.5rem 1rem; background:var(--blue); color:#fff;
+  box-shadow:0 6px 14px rgba(0,0,0,.15);
 }
 .brand{display:flex; align-items:center; gap:.75rem}
 .bmc-logo{height:56px; object-fit:contain; background:#fff8; padding:.25rem .4rem; border-radius:8px}
@@ -40,15 +41,46 @@ body{
 .select-wrap select{appearance:none; border:0; border-radius:6px; padding:.25rem .5rem}
 
 /* Top rail */
-.top-rail{position:sticky; top:74px; z-index:900; background:#fff; border-bottom:3px solid #f0a15e22}
-.milestones{list-style:none; margin:0; padding:.5rem 1rem; display:flex; gap:.5rem; flex-wrap:wrap}
-.chip{background:var(--chip); color:#174; padding:.35rem .6rem; border-radius:999px; font-weight:600; border:1px solid #cfe0f3}
-.chip.done{background:#e8f7ee; color:#0a6; border-color:#cdeedd; box-shadow:0 0 0 3px #bff3d44a inset}
-.chip.active{background:#fff7e6; color:#9a5c00; border-color:#ffe1b3; box-shadow:0 0 0 3px #ffc36a55 inset}
-.chip.pending{opacity:.6}
-.progress{height:6px; background:#eef3f8; margin:0 1rem .5rem; border-radius:6px; overflow:hidden}
-.progress #bar{display:block; width:0%; height:100%; background:linear-gradient(90deg,#2bb673,#6dd96d); transition:width .3s}
+.top-rail{
+  position:sticky; top:74px; z-index:900; background:#fff;
+  border-bottom:3px solid #f0a15e22;
+}
+.milestones{
+  list-style:none; margin:0; padding:.5rem 1rem; display:flex; gap:.5rem; flex-wrap:wrap;
+}
+.chip{
+  position:relative; display:inline-block;
+  padding:.35rem .7rem .35rem 2.2rem;
+  border-radius:999px; background:var(--chip);
+  border:1px solid #d6e6f6; color:#2a4b68; font-weight:600;
+}
+.chip::before{
+  content:""; position:absolute; left:.55rem; top:50%;
+  width:1.1rem; height:1.1rem; border-radius:50%;
+  transform:translateY(-50%);
+  box-shadow:inset 0 0 0 2px #a9bfd6; background:#fff;
+}
+.chip.done{background:#e9f7ee; border-color:#cfeedd; color:#0a6; box-shadow:0 0 0 3px #c6f2d84a inset}
+.chip.done::before{
+  box-shadow:none; background:#0a6;
+  -webkit-mask:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path fill='%23fff' d='M6.6 11.2L3.4 8l1.2-1.2 2 2 4-4L11.8 6z'/></svg>") no-repeat center/80% 80%;
+          mask:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path fill='%23fff' d='M6.6 11.2L3.4 8l1.2-1.2 2 2 4-4L11.8 6z'/></svg>") no-repeat center/80% 80%;
+}
+.chip.active{background:#fff7e6; border-color:#ffd99b; color:#9a5c00; box-shadow:0 0 0 3px #ffe7bb85 inset}
+.chip.active::before{
+  background:radial-gradient(circle at 50% 50%, #f18f01 55%, transparent 56%);
+  animation:chipspin 1.2s linear infinite;
+}
+@keyframes chipspin { to { transform:translateY(-50%) rotate(360deg); } }
+.chip.pending{opacity:.8}
 
+.progress{
+  height:6px; background:#e7eff7; margin:0 1rem .6rem; border-radius:6px; overflow:hidden;
+}
+.progress #bar{
+  display:block; width:0%; height:100%;
+  background:linear-gradient(90deg,#f7b500,#ffd56a); transition:width .28s ease;
+}
 .cdn-pill{position:absolute; right:12px; top:8px; font-size:.82rem; background:#edf6ff; border:1px solid #cfe0f3; color:#194a7a; border-radius:999px; padding:.2rem .55rem}
 .cdn-pill.ok{background:#e9f7ee;border-color:#bfe9ce;color:#0a6}
 .cdn-pill.err{background:#ffe7e7;border-color:#ffcaca;color:#b12e2e}
@@ -86,25 +118,22 @@ body{
 .img-wrap img{max-width:100%; height:auto; display:block}
 .overlay{position:relative}
 .scanner{
-  position:absolute; inset:0; background:
-    repeating-linear-gradient(180deg, transparent 0 36px, rgba(46,120,218,.08) 36px 40px);
+  position:absolute; inset:0;
+  background:repeating-linear-gradient(180deg, transparent 0 36px, rgba(46,120,218,.08) 36px 40px);
   animation:scan 2.2s linear infinite; display:none; border-radius:12px;
 }
 @keyframes scan{from{background-position-y:-40px} to{background-position-y:100%}}
 
-.statusbar{
-  display:flex; flex-wrap:wrap; gap:.75rem; justify-content:space-between;
-  color:#2a4259; padding:.75rem .25rem;
-}
+/* Status/times */
+.statusbar{display:flex; flex-wrap:wrap; gap:.75rem; justify-content:space-between; color:#2a4259; padding:.75rem .25rem}
 .status{padding:.2rem .5rem; border-radius:8px; background:#edf6ff; border:1px solid #cfe0f3}
 .status.ok{background:#e8f7ee;border-color:#bfe9ce;color:#0a6}
 .status.warn{background:#fff7e6;border-color:#ffe1b3;color:#9a5c00}
 .status.err{background:#ffe7e7;border-color:#ffcaca;color:#b12e2e}
 .times{color:#6f849b}
-
 .note{margin-top:.5rem; font-size:.92rem; color:#7a8da6}
 
-/* Results KV rows */
+/* Results */
 #results .kv{display:grid; grid-template-columns:160px 1fr; gap:.75rem; padding:.5rem .25rem; border-bottom:1px dashed #e6eef7}
 #results .k{color:#6a7d93; font-weight:600}
 #results .v{white-space:pre-wrap; word-break:break-word}
