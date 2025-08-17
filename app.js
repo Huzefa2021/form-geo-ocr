@@ -1,9 +1,7 @@
-/* Minimal, UI-unchanged pipeline:
-   - Show original (25%), crop bottom band, OCR with Tesseract (eng+hin)
-   - Parse date, time, latitude, longitude, address
-   - Normalize coords (recover decimals if OCR lost them)
-   - GeoJSON point-in-polygon (Ward/Beat/Police Station)
-*/
+/* App logic (UI unchanged)
+ * - Trims right side of cropped band to reduce noise icons
+ * - Stronger lat/lon parsing (handles 19 15927 → 19.15927 etc.)
+ */
 
 const els = {
   file: document.getElementById('file'),
@@ -34,9 +32,12 @@ const els = {
   ocrMode: document.getElementById('ocrMode'),
 };
 
+// ---- tunables (you can tweak without touching code) ----
+const CROP_FRACTION = (typeof window.CROP_FRACTION === 'number') ? window.CROP_FRACTION : 0.28; // bottom band height
+const RIGHT_TRIM_FRACTION = (typeof window.RIGHT_TRIM_FRACTION === 'number') ? window.RIGHT_TRIM_FRACTION : 0.18; // trim right 18%
+
 let geo = { wards:null, beats:null, police:null };
 const marks = { _start: performance.now(), upload:0, ocr:0, parse:0, geo:0, review:0 };
-const CROP_FRACTION = (typeof window.CROP_FRACTION === 'number') ? window.CROP_FRACTION : 0.28;
 
 function setChip(el){
   [els.stepUpload, els.stepOcr, els.stepParse, els.stepGeo, els.stepReview]
@@ -70,19 +71,24 @@ async function loadGeo(){
 
 function readAsDataURL(file){ return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=rej; fr.readAsDataURL(file); }); }
 
-function drawImageToCanvas(img, canvas, cropFractionBottom){
+// ---- CROPPING: trim bottom band, and shave the right side ----
+function drawImageToCanvas(img, canvas, cropFractionBottom, rightTrimFraction){
   const iw = img.naturalWidth, ih = img.naturalHeight;
   const bandH = Math.max(120, Math.floor(ih * cropFractionBottom));
-  canvas.width = iw;
+  const trimW = Math.max(0, Math.floor(iw * (rightTrimFraction || 0)));
+  const sWidth = Math.max(1, iw - trimW);
+
+  canvas.width = sWidth;
   canvas.height = bandH;
   const ctx = canvas.getContext('2d');
-  ctx.drawImage(img, 0, ih - bandH, iw, bandH, 0, 0, iw, bandH);
+  // source: bottom band; exclude rightmost trim
+  ctx.drawImage(img, 0, ih - bandH, sWidth, bandH, 0, 0, sWidth, bandH);
 }
 
 async function runTesseractOnCanvas(canvas){
   const worker = await Tesseract.createWorker();
   try{
-    await worker.loadLanguage('eng+hin'); // Hindi (Devanagari) helps with Marathi glyphs
+    await worker.loadLanguage('eng+hin');
     await worker.initialize('eng+hin');
     const { data:{ text } } = await worker.recognize(canvas);
     return text || '';
@@ -96,86 +102,92 @@ async function runTesseractOnCanvas(canvas){
 function normalizeCoord(num, isLat){
   if(!Number.isFinite(num)) return null;
   const limit = isLat ? 90 : 180;
-  let val = num;
-  let tries = 0;
+  let val = num, tries = 0;
   while(Math.abs(val) > limit && tries < 8){
     val = val / 10;
     tries++;
   }
-  if(Math.abs(val) <= limit) return val;
-  return null;
+  return (Math.abs(val) <= limit) ? val : null;
 }
 
-// Recover decimal for Mumbai-area coords if OCR dropped it (e.g., "1915927" → 19.15927)
+// Mumbai specific decimal recovery if OCR lost the dot
 function recoverMumbaiDecimal(digits, isLat){
   if(!digits) return null;
   const n = digits.replace(/\D/g,'');
   if(n.length < 6) return null;
-  const split = 2; // Mumbai lat ~19.xx, lon ~72.xx
+  const split = 2; // 19.xx / 72.xx
   const val = parseFloat(n.slice(0,split) + '.' + n.slice(split));
   return normalizeCoord(val, isLat);
 }
 
-// extract number after a label on the nearest line
+// Try to read number after label on line, with multiple strategies
 function extractCoordFromLines(lines, labelRegex, isLat){
   const idx = lines.findIndex(s => labelRegex.test(s));
   if(idx === -1) return null;
 
-  // Search on the same line first
-  const line = lines[idx];
-  let m = line.match(/([+-]?\d{1,3}(?:[.,]\d{1,9})?)\s*[°o]?/);
-  if(m){
-    const v = parseFloat(m[1].replace(',', '.'));
-    const norm = normalizeCoord(v, isLat);
-    if(norm != null) return norm;
-  }
+  const candidates = [];
+  const consider = [];
 
-  // Try digits-only recovery on same line
-  let digits = (line.match(/([0-9][0-9 .]*)/) || [,''])[1];
-  let rec = recoverMumbaiDecimal(digits, isLat);
-  if(rec != null) return rec;
+  // look on same line and next line
+  consider.push(lines[idx]);
+  if(lines[idx+1]) consider.push(lines[idx+1]);
 
-  // Try the next line as well (some templates break line)
-  if(lines[idx+1]){
-    const l2 = lines[idx+1];
-    m = l2.match(/([+-]?\d{1,3}(?:[.,]\d{1,9})?)\s*[°o]?/);
-    if(m){
-      const v = parseFloat(m[1].replace(',', '.'));
-      const norm = normalizeCoord(v, isLat);
-      if(norm != null) return norm;
+  for(const line of consider){
+    // 1) plain decimal with optional degree
+    const m1 = line.match(/([+-]?\d{1,3}(?:[.,]\d{1,9})?)\s*[°o]?/);
+    if(m1){
+      const v = parseFloat(m1[1].replace(',', '.'));
+      const n = normalizeCoord(v, isLat);
+      if(n != null) candidates.push(n);
     }
-    digits = (l2.match(/([0-9][0-9 .]*)/) || [,''])[1];
-    rec = recoverMumbaiDecimal(digits, isLat);
-    if(rec != null) return rec;
+
+    // 2) digit groups like "19 15927" → join into 19.15927 (Mumbai heuristic)
+    const after = line.replace(/^.*?(Lat(?:itude)?|Lon(?:g(?:itude)?|g\.?)|Lng)\s*[:\-]?\s*/i,'');
+    const groups = after.match(/\d+/g);
+    if(groups && groups.length >= 2){
+      const first = parseInt(groups[0],10);
+      const frac  = groups.slice(1).join(''); // keep all following chunks together
+      if(isLat && first>=18 && first<=21 && frac.length>=2){
+        const nn = parseFloat(`${first}.${frac}`);
+        const n  = normalizeCoord(nn, true);
+        if(n!=null) candidates.push(n);
+      }
+      if(!isLat && first>=70 && first<=75 && frac.length>=2){
+        const nn = parseFloat(`${first}.${frac}`);
+        const n  = normalizeCoord(nn, false);
+        if(n!=null) candidates.push(n);
+      }
+    }
+
+    // 3) digits-only recovery on the line
+    const digits = (line.match(/([0-9][0-9 .]*)/) || [,''])[1];
+    const rec = recoverMumbaiDecimal(digits, isLat);
+    if(rec != null) candidates.push(rec);
   }
-  return null;
+
+  if(!candidates.length) return null;
+
+  // choose the candidate with most precision (max decimals)
+  const best = candidates
+    .map(v => ({ v, decs: (v.toString().split('.')[1]||'').length }))
+    .sort((a,b)=> b.decs - a.decs)[0].v;
+
+  return best;
 }
 
 function pickAddress(lines){
-  // Prefer a strong address candidate BEFORE the Lat line
   const latIdx = lines.findIndex(s => /Lat(?:itude)?/i.test(s));
   const search = (latIdx > 0) ? lines.slice(0, latIdx) : lines.slice();
-
-  // Candidates: has PIN code, Plus Code, or ≥2 commas, or contains "Mumbai"
-  const pin = /\b\d{6}\b/;
+  const pin  = /\b\d{6}\b/;
   const plus = /\b[A-Za-z0-9]{4,}\+[A-Za-z0-9]{2,}\b/;
   const cands = search.filter(s =>
-      pin.test(s) || plus.test(s) || (s.split(',').length-1)>=2 || /Mumbai|Maharashtra/i.test(s)
+    pin.test(s) || plus.test(s) || (s.split(',').length-1)>=2 || /Mumbai|Maharashtra/i.test(s)
   );
-
   if(cands.length){
-    // Choose the longest reasonable one
     let best = cands.reduce((a,b)=> b.length>a.length?b:a);
-    // Clean noise
-    best = best
-      .replace(/[^A-Za-z0-9,+\-&/(). ]+/g,' ')      // strip OCR junk glyphs
-      .replace(/\s{2,}/g,' ')
-      .replace(/\s+,/g,',')
-      .trim();
+    best = best.replace(/[^A-Za-z0-9,+\-&/(). ]+/g,' ').replace(/\s{2,}/g,' ').replace(/\s+,/g,',').trim();
     return best;
   }
-
-  // Fallback: longest line in all text
   let fallback = lines.reduce((a,b)=> b.length>a.length?b:a, '');
   return fallback.replace(/\s{2,}/g,' ').trim();
 }
@@ -186,20 +198,20 @@ function parseFields(text){
   // Date
   let date = null;
   for(const s of lines){
-    let m = s.match(/\b(\d{4}[-/]\d{2}[-/]\d{2})\b/); // 2025-08-16
+    let m = s.match(/\b(\d{4}[-/]\d{2}[-/]\d{2})\b/);
     if(m){ date = m[1].replace(/\//g,'-'); break; }
-    m = s.match(/\b(\d{2}[-/]\d{2}[-/]\d{4})\b/);     // 16-08-2025 or 16/08/2025
+    m = s.match(/\b(\d{2}[-/]\d{2}[-/]\d{4})\b/);
     if(m){ date = m[1].replace(/\//g,'-'); break; }
   }
 
-  // Time (drop GMT suffix later)
+  // Time
   let time = null;
   for(const s of lines){
     const m = s.match(/\b([0-2]?\d:[0-5]\d(?:\s?[AP]M)?)\b/);
     if(m){ time = m[1]; break; }
   }
 
-  // Latitude / Longitude (robust)
+  // Coordinates
   let lat = extractCoordFromLines(lines, /Lat(?:itude)?/i, true);
   let lon = extractCoordFromLines(lines, /Lon(?:g|gitude|g\.)|Lng/i, false);
 
@@ -281,10 +293,10 @@ async function processFile(file){
   els.originalWrap.classList.remove('hidden');
 
   await new Promise(r=> setTimeout(r, 30));
-  drawImageToCanvas(els.original, els.cropCanvas, CROP_FRACTION);
+  drawImageToCanvas(els.original, els.cropCanvas, CROP_FRACTION, RIGHT_TRIM_FRACTION);
   marks.upload = performance.now(); setTiming();
 
-  // OCR (local)
+  // OCR
   setChip(els.stepOcr);
   const text = await runTesseractOnCanvas(els.cropCanvas);
   marks.ocr = performance.now(); setTiming();
@@ -303,7 +315,7 @@ async function processFile(file){
   marks.parse = performance.now(); setTiming();
 
   // GeoJSON
-  setChip(els.stepGeo);
+  setChip(els.stepGeo));
   if(!geo.wards) await loadGeo();
 
   const lon = Number(parsed.lon), lat = Number(parsed.lat);
@@ -323,7 +335,6 @@ async function processFile(file){
 
   marks.geo = performance.now(); setTiming();
 
-  // Review
   setChip(els.stepReview);
   marks.review = performance.now(); setTiming();
 }
