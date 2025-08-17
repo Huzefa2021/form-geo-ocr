@@ -24,6 +24,7 @@
       --shadow-img:  0 10px 24px rgba(0,0,0,.12);
       --shadow-hover:0 18px 40px rgba(16,38,74,.18);
       --shadow-float:0 12px 30px rgba(10,25,55,.22);
+      --topbar-h: clamp(56px, 8vw, 72px);
     }
     *{box-sizing:border-box}
     html,body{height:100%}
@@ -44,8 +45,12 @@
       border-bottom: 4px solid var(--mcgm-orange);
     }
     .topbar{background:var(--mcgm-blue); color:#fff}
-    .topbar-inner{max-width:1180px; margin:0 auto; padding:10px 16px; display:flex; align-items:center; gap:12px}
-    .topbar img{height:48px; width:auto}
+    .topbar-inner{
+      max-width:1180px; margin:0 auto; padding:0 16px;
+      height:var(--topbar-h);
+      display:flex; align-items:center; gap:12px
+    }
+    .topbar img{height:100%; width:auto} /* logo fills full header height */
     .brand-title{font-weight:700; font-size:clamp(16px,2.6vw,20px); line-height:1.2}
     .brand-sub{font-size:clamp(12px,2vw,14px); opacity:.9}
     .header-actions{margin-left:auto}
@@ -173,7 +178,7 @@
     .v{font-family:ui-monospace,Menlo,Consolas,monospace; color:#1b3d62; word-break:break-word}
     @media (min-width: 600px){ .kv{grid-template-columns: 200px 1fr} }
 
-    .footer{margin-top:16px; background:var(--mcgm-blue-dark); color:#e9f2fb; border-top:3px solid #mcgm-orange}
+    .footer{margin-top:16px; background:var(--mcgm-blue-dark); color:#e9f2fb; border-top:3px solid var(--mcgm-orange)}
     .footer-inner{max-width:1180px; margin:0 auto; padding:14px; font-size:clamp(12px,2vw,13px); text-align:center}
     .footer-inner a{color:#ffd166; font-weight:600}
 
@@ -293,7 +298,9 @@
   <!-- FOOTER -->
   <div class="footer">
     <div class="footer-inner">
-      &copy; 2025 Municipal Corporation of Greater Mumbai (MCGM) •
+      Developed by <strong>Crescendo Innovative Solutions LLP</strong>. All rights reserved by <strong>Crescendo</strong> •
+      Admin: <strong>Huzefa Fakhruddin</strong> — <a href="mailto:Care@crescendoits.com">Care@crescendoits.com</a> •
+      &copy; 2025 Municipal Corporation of Greater Mumbai (MCGM) —
       <a href="https://www.mcgm.gov.in" target="_blank" rel="noopener">www.mcgm.gov.in</a>
     </div>
   </div>
@@ -318,7 +325,7 @@
       <div class="m-body" id="timeoutBody">
         A stage exceeded the maximum allowed time.<br/>
         <strong>Reason:</strong> Network slowness, large image, or blocked resources.<br/><br/>
-        <strong>Admin:</strong> Huzefa Fakhruddin — <a href="mailto:ptradingmumbai@gmail.com">ptradingmumbai@gmail.com</a>
+        <strong>Admin:</strong> Huzefa Fakhruddin — <a href="mailto:Care@crescendoits.com">Care@crescendoits.com</a>
       </div>
       <div class="m-actions">
         <button id="timeoutRetry" class="btn btn-primary">Retry</button>
@@ -334,7 +341,7 @@
       <div class="m-body" id="cdnBody">
         Required OCR assets could not be reached from the current network.<br/><br/>
         <strong>Try:</strong> Retry the check, or switch to a fallback CDN.<br/><br/>
-        <strong>Admin:</strong> Huzefa Fakhruddin — <a href="mailto:ptradingmumbai@gmail.com">ptradingmumbai@gmail.com</a>
+        <strong>Admin:</strong> Huzefa Fakhruddin — <a href="mailto:Care@crescendoits.com">Care@crescendoits.com</a>
       </div>
       <div class="m-actions">
         <button id="cdnUseFallback" class="btn btn-primary">Use Fallback CDN</button>
@@ -439,6 +446,10 @@ const state = {
   timedOut: false
 };
 
+/* ========= Helpers ========= */
+// Normalize value to array (Tesseract-friendly)
+const arr = (x) => Array.isArray(x) ? x : [x];
+
 /* ========= UI Helpers ========= */
 function setStatus(msg, cls){ els.status.className = 'status ' + (cls||''); els.status.textContent = msg; }
 function kvRow(id, label, value){
@@ -527,7 +538,7 @@ function onStageTimeout(i){
   els.timeoutBody.innerHTML = `
     The <strong>${name}</strong> stage exceeded the maximum allowed time of <strong>${limit}</strong>.<br/><br/>
     <strong>Reason (typical):</strong> network slowness, large/corrupted image, or blocked resources (CDN).<br/><br/>
-    <strong>Admin:</strong> Huzefa Fakhruddin — <a href="mailto:ptradingmumbai@gmail.com">ptradingmumbai@gmail.com</a>
+    <strong>Admin:</strong> Huzefa Fakhruddin — <a href="mailto:Care@crescendoits.com">Care@crescendoits.com</a>
   `;
   els.timeoutBackdrop.style.display = 'flex';
 }
@@ -628,21 +639,32 @@ function lookup(lat, lon){
 async function probe(url){
   try{
     const res = await fetch(url, { method:'GET', headers:{ 'Range':'bytes=0-15' }, cache:'no-store', mode:'cors' });
-    return res.ok || res.status === 206 || res.status === 416; // 416 if range not satisfiable but reachable
+    return res.ok || res.status === 206 || res.status === 416;
   }catch(e){ return false; }
 }
 async function checkCDN(cdn){
   const okWorker = await probe(cdn.workerPath);
-  // try either wasm variant (some builds pick simd)
-  const okCoreA = await probe(cdn.corePath + '/tesseract-core.wasm.js');
-  const okCoreB = okCoreA ? true : await probe(cdn.corePath + '/tesseract-core-simd.wasm.js');
-  const okLang  = await probe(cdn.langPath + '/eng/4.0.0/eng.traineddata.gz');
-  return okWorker && (okCoreA || okCoreB) && okLang;
+
+  const cores = arr(cdn.corePath);
+  let okCore = false;
+  for (const base of cores) {
+    const a = await probe(base + '/tesseract-core.wasm.js');
+    const b = a ? true : await probe(base + '/tesseract-core-simd.wasm.js');
+    if (a || b) { okCore = true; break; }
+  }
+
+  const langs = arr(cdn.langPath);
+  let okLang = false;
+  for (const base of langs) {
+    if (await probe(base + '/eng/4.0.0/eng.traineddata.gz')) { okLang = true; break; }
+  }
+
+  return okWorker && okCore && okLang;
 }
 function showCDNModal(msg){
   els.cdnBody.innerHTML = `
     ${msg || 'Required OCR assets could not be reached from the current network.'}<br/><br/>
-    <strong>Admin:</strong> Huzefa Fakhruddin — <a href="mailto:ptradingmumbai@gmail.com">ptradingmumbai@gmail.com</a>
+    <strong>Admin:</strong> Huzefa Fakhruddin — <a href="mailto:Care@crescendoits.com">Care@crescendoits.com</a>
   `;
   els.cdnBackdrop.style.display = 'flex';
 }
@@ -705,11 +727,11 @@ async function runPipeline(file){
     els.overlayScanner.style.display = "block";
 
     try {
-      // Worker WITHOUT logger (prevents DataCloneError); using current CDN paths
+      // Worker WITHOUT logger; core/lang paths as arrays (fixes x.map)
       const worker = await Tesseract.createWorker({
         workerPath: CDN_CURRENT.workerPath,
-        corePath:   CDN_CURRENT.corePath,
-        langPath:   CDN_CURRENT.langPath
+        corePath:   arr(CDN_CURRENT.corePath),
+        langPath:   arr(CDN_CURRENT.langPath)
       });
       await worker.loadLanguage('eng');
       await worker.initialize('eng');
@@ -772,9 +794,9 @@ async function runPipeline(file){
         const { data: { text } } = await Tesseract.recognize(
           state.croppedUrl, 'eng',
           {
-            corePath: CDN_CURRENT.corePath,
-            langPath: CDN_CURRENT.langPath,
-            logger: m => { /* optional: progress on main thread */ }
+            corePath: arr(CDN_CURRENT.corePath),
+            langPath: arr(CDN_CURRENT.langPath),
+            logger: m => { /* optional progress on main thread */ }
           }
         );
         endStage(1); // mark OCR done after fallback
