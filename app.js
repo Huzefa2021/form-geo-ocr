@@ -1,6 +1,6 @@
 /* ==========================================================
    Abandoned Vehicles — Marshal Upload (MCGM)
-   app.js (relaxed bottom crop + fuzzy parsing + always-on console)
+   Final app.js (Geo preload + BBoxes + header badges + console logs)
    ========================================================== */
 
 const $ = (id) => document.getElementById(id);
@@ -29,18 +29,25 @@ const pills = {
   redirect: $('pill-redirect'),
 };
 
-/* ---------- CDN badge ---------- */
+/* ---------- Header badges ---------- */
 function updateCdnBadge(){
   const b = $('cdnBadge'); if(!b) return;
   const ok = !!(window.Tesseract && Tesseract.recognize);
   b.textContent = ok ? 'CDN: v5 (Loaded)' : 'CDN: v5 (Not Loaded)';
-  b.style.background = ok ? '#16a34a' : '#ef4444';
-  b.style.color = '#fff';
+  b.classList.remove('badge-info','badge-err','badge-ok','badge-warn');
+  b.classList.add(ok ? 'badge-ok' : 'badge-err');
+}
+function setGeoBadge(state, extra=''){
+  const g = $('geoBadge'); if(!g) return;
+  g.classList.remove('badge-warn','badge-err','badge-ok');
+  if(state==='ok'){ g.classList.add('badge-ok'); g.textContent='Geo: Loaded' + (extra?` (${extra})`:''); }
+  else if(state==='err'){ g.classList.add('badge-err'); g.textContent='Geo: Failed'; }
+  else { g.classList.add('badge-warn'); g.textContent='Geo: Loading…'; }
 }
 document.addEventListener('DOMContentLoaded', updateCdnBadge);
 window.addEventListener('load', updateCdnBadge);
 
-/* ---------- helpers ---------- */
+/* ---------- Helpers ---------- */
 function setPill(name, state){
   const p = pills[name]; if(!p) return;
   p.classList.remove('ok','run','err');
@@ -51,7 +58,7 @@ function banner(msg, kind='info'){
   if(!msg){ b.hidden = true; return; }
   b.hidden = false;
   b.textContent = msg;
-  b.className = `banner ${kind==='error'?'banner--error':''}`;
+  b.className = `banner ${kind}`;
 }
 function resetOutputs(){
   ['upload','ocr','parse','geo','review','redirect'].forEach(k=> setPill(k,null));
@@ -64,12 +71,12 @@ function resetOutputs(){
 function fileToDataURL(f){ return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=rej; fr.readAsDataURL(f); }); }
 function loadImage(url){ return new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=url; }); }
 
-/* ---------- Console / Debug (uses the box in HTML) ---------- */
+/* ---------- Console ---------- */
 function ensureConsoleBox(){
   const box = $('console-box');
-  const footer = document.querySelector('.footer');
-  if (box && footer && box.nextElementSibling !== footer) {
-    footer.parentNode.insertBefore(box, footer);
+  const footer = document.querySelector('.app-footer');
+  if (box && footer && box.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING) {
+    // ok
   }
   return box;
 }
@@ -81,12 +88,12 @@ function logToConsole(rawText, parsed, note=''){
   const safe = (v)=> (v==null?'':String(v));
   const log = [
     `⏱ ${stamp} ${note}`,
-    '--- RAW OCR TEXT ---',
-    safe(rawText),
-    '--- PARSED FIELDS ---',
-    (parsed && typeof parsed==='object') ? JSON.stringify(parsed,null,2) : safe(parsed),
+    rawText!=='' ? '--- RAW OCR TEXT ---' : '',
+    rawText!=='' ? safe(rawText) : '',
+    parsed!=='' ? '--- PARSED FIELDS ---' : '',
+    (parsed && typeof parsed==='object') ? JSON.stringify(parsed,null,2) : (parsed!==''?safe(parsed):''),
     '────────────────────────────────────────'
-  ].join('\n');
+  ].filter(Boolean).join('\n');
   pre.textContent = log + '\n' + pre.textContent;
 }
 
@@ -109,7 +116,6 @@ async function cropHud(dataURL){
   let sy=Math.floor(H*P.top);
   let sh=Math.floor(H*P.height);
   sy = Math.max(0, sy - Math.floor(H*P.pad.top));
-  // keep more at the bottom (slightly relaxed already here)
   sh = Math.min(H - sy, sh + Math.floor(H*(P.pad.top + P.pad.bottom)));
 
   let sx=Math.floor(W*(P.mapCut+P.pad.left));
@@ -126,16 +132,13 @@ async function cropHud(dataURL){
   return c.toDataURL('image/png');
 }
 
-/* ---------- Preprocess for OCR ----------
-   NOTE: we RELAXED the bottom cut from 10% -> 4% so the date/time line stays intact.
--------------------------------------------------- */
+/* ---------- OCR preprocess (relaxed bottom cut) ---------- */
 async function preprocessForOCR(cropDataURL){
   const src=await loadImage(cropDataURL);
   const w=src.naturalWidth, h=src.naturalHeight;
 
-  // Remove top branding (still needed) and keep more bottom
-  const cutTop=Math.floor(h*0.18);     // keep as-is
-  const cutBottom=Math.floor(h*0.04);  // RELAXED (was 0.10)
+  const cutTop=Math.floor(h*0.18);
+  const cutBottom=Math.floor(h*0.04); // relaxed from 10%
   const h2=h - cutTop - cutBottom;
 
   const c=document.createElement('canvas');
@@ -143,14 +146,13 @@ async function preprocessForOCR(cropDataURL){
   const ctx=c.getContext('2d',{willReadFrequently:true});
   ctx.drawImage(src, 0, -cutTop, w, h);
 
-  // Upscale ×3 for better OCR
+  // Upscale ×3 + binarize + light closing
   const up=document.createElement('canvas');
   up.width=c.width*3; up.height=c.height*3;
   const uctx=up.getContext('2d');
   uctx.imageSmoothingEnabled=true;
   uctx.drawImage(c,0,0,up.width,up.height);
 
-  // Binarize
   let im = uctx.getImageData(0,0,up.width,up.height);
   const d=im.data;
   for(let i=0;i<d.length;i+=4){
@@ -160,14 +162,16 @@ async function preprocessForOCR(cropDataURL){
   }
   uctx.putImageData(im,0,0);
 
-  // Light closing to join thin gaps (3x3)
+  // 3x3 closing
   const W=up.width, H=up.height;
   im = uctx.getImageData(0,0,W,H);
   const pix=im.data;
   const get=(x,y)=> pix[(y*W + x)*4];
-  const set=(x,y,v)=>{ const k=(y*W + x)*4; pix[k]=pix[k+1]=pix[k+2]=v; };
-  // dilate
+  const set=(x,y,v)=>{ const k=(y*W + x)*4; pix[k]=pix[k+1]=pix[k+2]=v; pix[k+3]=255; };
   const copy1=new Uint8ClampedArray(pix.length); copy1.set(pix);
+  const get1=(x,y)=> copy1[(y*W + x)*4];
+
+  // dilate
   for(let y=1;y<H-1;y++){
     for(let x=1;x<W-1;x++){
       let any=0;
@@ -179,17 +183,13 @@ async function preprocessForOCR(cropDataURL){
     }
   }
   // erode
-  const copy2=new Uint8ClampedArray(copy1.length); copy2.set(copy1);
-  const get1=(x,y)=> copy1[(y*W + x)*4];
   for(let y=1;y<H-1;y++){
     for(let x=1;x<W-1;x++){
       let all=1;
       for(let yy=-1;yy<=1 && all;yy++)
         for(let xx=-1;xx<=1;xx++)
           if (get1(x+xx,y+yy)!==255){ all=0; break; }
-      const v=all?255:0;
-      set(x,y,v);
-      pix[(y*W+x)*4+3]=255;
+      const v=all?255:0; set(x,y,v);
     }
   }
   uctx.putImageData(im,0,0);
@@ -222,30 +222,21 @@ async function handleFile(file){
   imgOriginal && (imgOriginal.src = dataURL);
   setPill('upload','ok');
 
-  // Crop
+  // Crop + Preprocess
   setPill('ocr','run');
-  let cropURL='';
+  let cropURL=''; let processed='';
   try{
     cropURL = await cropHud(dataURL);
-  }catch(e){
-    setPill('ocr','err'); banner('Crop failed. Try again.','error'); logToConsole('',{error:String(e)},'[Crop error]'); return;
-  }
-
-  // Preprocess (for OCR) — relaxed bottom cut
-  let processed = '';
-  try{
     processed = await preprocessForOCR(cropURL);
+    imgCrop && (imgCrop.src = processed);
   }catch(e){
-    setPill('ocr','err'); banner('Preprocessing failed.','error'); logToConsole('',{error:String(e)},'[Preprocess error]'); return;
+    setPill('ocr','err'); banner('Crop/Preprocess failed.','error'); logToConsole('',{error:String(e)},'[Preprocess error]'); return;
   }
-
-  imgCrop && (imgCrop.src = processed);
 
   // OCR
   if(!(window.Tesseract && Tesseract.recognize)){
     setPill('ocr','err'); banner('OCR engine not loaded (CDN).','error'); return;
   }
-
   let rawText='';
   try{
     const res = await Tesseract.recognize(
@@ -279,10 +270,27 @@ async function handleFile(file){
   outLon  && (outLon.textContent  = parsed.lon.toFixed(6));
   outAddr && (outAddr.textContent = parsed.address);
 
-  // GeoJSON
+  // GeoJSON lookup
   setPill('geo','run');
   try{ await ensureGeo(); }catch{ setPill('geo','err'); banner('Failed to load GeoJSON.','error'); return; }
-  const gj = geoLookup(parsed.lat, parsed.lon);
+
+  // sanity
+  const inRange = (parsed.lat>=18 && parsed.lat<=20) && (parsed.lon>=72 && parsed.lon<=73.5);
+  logToConsole('', { lat: parsed.lat, lon: parsed.lon, inRange }, '[Lat/Lon sanity]');
+  updateBBoxCanvasWithPoint(parsed.lat, parsed.lon); // draw point on canvas
+  logToConsole('', { point: [parsed.lon, parsed.lat] }, '[BBox canvas updated]');
+
+  const gj1 = geoLookup(parsed.lat, parsed.lon);
+  let gj = gj1;
+  if(!gj1.ward && !gj1.beat && !gj1.ps){
+    const gj2 = geoLookup(parsed.lon, parsed.lat); // fallback if swapped
+    if (gj2.ward || gj2.beat || gj2.ps) {
+      logToConsole('', { note:'Used swapped lon/lat' }, '[Geo fallback]');
+      gj = gj2;
+    }
+  }
+  logToConsole('', { matched: gj }, '[Geo match]');
+
   if(!gj.ward || !gj.beat || !gj.ps){ setPill('geo','err'); banner('GeoJSON lookup failed.','error'); return; }
   outWard && (outWard.textContent = gj.ward);
   outBeat && (outBeat.textContent = gj.beat);
@@ -336,22 +344,16 @@ function parseHudText(raw){
   let lat = NaN, lon = NaN;
   if (m){ lat = parseFloat(m[1]); lon = parseFloat(m[2]); }
 
-  // Fuzzy date/time cleanup & parsing using the last two lines combined
+  // Fuzzy date/time cleanup & parsing
   let date = '', time = '';
   let dt = lastTwo
             .replace(/CMT/gi,'GMT')
             .replace(/OV/gi,'08')
-            .replace(/O(?=\d)/g,'0'); // 'O' misread as zero in numeric contexts
-
-  // Try common patterns
+            .replace(/O(?=\d)/g,'0');
   let md =
     dt.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{4}).*?(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i) ||
     dt.match(/(\d{4}[\/-]\d{2}[\/-]\d{2}).*?(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i);
-
-  if (md) {
-    date = md[1];
-    time = md[2].replace(/\s+/g,' ').trim();
-  }
+  if (md) { date = md[1]; time = md[2].replace(/\s+/g,' ').trim(); }
 
   // Address cleanup
   addr = addr
@@ -367,27 +369,106 @@ function parseHudText(raw){
   return { address: addr, lat, lon, date, time };
 }
 
-/* ---------- GeoJSON ---------- */
+/* ---------- GeoJSON + BBoxes ---------- */
 let gjW=null, gjB=null, gjP=null;
+let bboxW=[], bboxB=[], bboxP=[];
+function bboxOfPolyCoords(coords){
+  const all = [];
+  const addRing = (ring)=> { for(const [x,y] of ring){ all.push([x,y]); } };
+  if(Array.isArray(coords)){
+    if(typeof coords[0][0][0] === 'number'){ coords.forEach(addRing); } // Polygon
+    else { coords.forEach(poly => poly.forEach(addRing)); } // MultiPolygon
+  }
+  if(!all.length) return null;
+  let minX=+Infinity, minY=+Infinity, maxX=-Infinity, maxY=-Infinity;
+  for(const [x,y] of all){
+    if(x<minX) minX=x; if(y<minY) minY=y;
+    if(x>maxX) maxX=x; if(y>maxY) maxY=y;
+  }
+  return [minX,minY,maxX,maxY];
+}
+function precomputeBBoxes(){
+  bboxW = (gjW?.features||[]).map(f => bboxOfPolyCoords(f.geometry.coordinates)).filter(Boolean);
+  bboxB = (gjB?.features||[]).map(f => bboxOfPolyCoords(f.geometry.coordinates)).filter(Boolean);
+  bboxP = (gjP?.features||[]).map(f => bboxOfPolyCoords(f.geometry.coordinates)).filter(Boolean);
+  logToConsole('', {
+    wardsBBox: bboxW.length, beatsBBox: bboxB.length, policeBBox: bboxP.length
+  }, '[BBox precomputed]');
+}
+function drawBBoxes(pointLonLat){
+  const cvs = $('geoCanvas'); if(!cvs) return;
+  const ctx = cvs.getContext('2d');
+  const W = cvs.width, H = cvs.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#0b1220'; ctx.fillRect(0,0,W,H);
+
+  const all = [...bboxW, ...bboxB, ...bboxP];
+  if(!all.length) { return; }
+  let gminX=+Infinity, gminY=+Infinity, gmaxX=-Infinity, gmaxY=-Infinity;
+  for(const [minX,minY,maxX,maxY] of all){
+    if(minX<gminX) gminX=minX; if(minY<gminY) gminY=minY;
+    if(maxX>gmaxX) gmaxX=maxX; if(maxY>gmaxY) gmaxY=maxY;
+  }
+  const pad = 10;
+  const sx = (W - pad*2) / (gmaxX - gminX);
+  const sy = (H - pad*2) / (gmaxY - gminY);
+  const kx = sx, ky = -sy;
+  const mapX = (x)=> pad + (x - gminX)*kx;
+  const mapY = (y)=> H - pad + (y - gminY)*ky;
+
+  const rect = (bb, color)=>{
+    const [minX,minY,maxX,maxY] = bb;
+    ctx.strokeStyle=color; ctx.lineWidth=1.25;
+    ctx.strokeRect(mapX(minX), mapY(maxY), (maxX-minX)*kx, (maxY-minY)*Math.abs(ky));
+  };
+
+  ctx.globalAlpha = 0.9;
+  bboxW.forEach(bb => rect(bb, '#22c55e')); // wards
+  bboxB.forEach(bb => rect(bb, '#f59e0b')); // beats
+  bboxP.forEach(bb => rect(bb, '#60a5fa')); // police
+
+  if(pointLonLat && isFinite(pointLonLat[0]) && isFinite(pointLonLat[1])){
+    const [lon, lat] = pointLonLat;
+    ctx.fillStyle='#ff4d4f';
+    ctx.beginPath(); ctx.arc(mapX(lon), mapY(lat), 4, 0, Math.PI*2); ctx.fill();
+  }
+}
+function updateBBoxCanvasWithPoint(lat, lon){
+  if(!isFinite(lat) || !isFinite(lon)) { drawBBoxes(null); return; }
+  drawBBoxes([lon, lat]);
+}
+
+/* Load Geo at startup */
 async function ensureGeo(){
   if(gjW && gjB && gjP) return;
-  const [w,b,p] = await Promise.all([
-    fetch('data/wards.geojson').then(r=>r.json()),
-    fetch('data/beats.geojson').then(r=>r.json()),
-    fetch('data/police_jurisdiction.geojson').then(r=>r.json()),
-  ]);
-  gjW=w; gjB=b; gjP=p;
+  setGeoBadge('loading');
+  try{
+    const [w,b,p] = await Promise.all([
+      fetch('data/wards.geojson').then(r=>r.json()),
+      fetch('data/beats.geojson').then(r=>r.json()),
+      fetch('data/police_jurisdiction.geojson').then(r=>r.json()),
+    ]);
+    gjW=w; gjB=b; gjP=p;
+    precomputeBBoxes();
+    const counts = `${gjW?.features?.length||0}/${gjB?.features?.length||0}/${gjP?.features?.length||0}`;
+    setGeoBadge('ok', counts);
+    logToConsole('', {
+      wards: gjW?.features?.length||0,
+      beats: gjB?.features?.length||0,
+      police: gjP?.features?.length||0
+    }, '[GeoJSON loaded]');
+    drawBBoxes(null);
+    logToConsole('', { bboxes: { wards:bboxW.length, beats:bboxB.length, police:bboxP.length } }, '[BBox drawn]');
+  }catch(e){
+    console.error('Geo load failed', e);
+    setGeoBadge('err');
+    logToConsole('', { error:String(e) }, '[GeoJSON load error]');
+    throw e;
+  }
 }
-function geoLookup(lat,lon){
-  const out={ward:'',beat:'',ps:''}; if(!gjW||!gjB||!gjP) return out;
-  const pt=[lon,lat];
-  const inG=(g)=> g.type==='Polygon' ? inPoly(g.coordinates,pt)
-               : g.type==='MultiPolygon' ? g.coordinates.some(r=>inPoly(r,pt)) : false;
-  for(const f of gjW.features) if(inG(f.geometry)){ out.ward=f.properties.WARD||''; break; }
-  for(const f of gjB.features) if(inG(f.geometry)){ out.beat=f.properties.BEAT_NO||''; break; }
-  for(const f of gjP.features) if(inG(f.geometry)){ out.ps  =f.properties.PS_NAME||''; break; }
-  return out;
-}
+document.addEventListener('DOMContentLoaded', () => { ensureGeo(); });
+
+/* ---------- Geo lookup helpers ---------- */
 function inPoly(poly,[x,y]){
   let inside=false;
   for(const ring of poly){
@@ -399,6 +480,16 @@ function inPoly(poly,[x,y]){
     }
   }
   return inside;
+}
+function geoLookup(lat,lon){
+  const out={ward:'',beat:'',ps:''}; if(!gjW||!gjB||!gjP) return out;
+  const pt=[lon,lat];
+  const inG=(g)=> g?.type==='Polygon' ? inPoly(g.coordinates,pt)
+            : g?.type==='MultiPolygon' ? g.coordinates.some(r=>inPoly(r,pt)) : false;
+  for(const f of gjW.features) if(inG(f.geometry)){ out.ward = f.properties.WARD ?? f.properties.ward_no ?? f.properties.ward ?? ''; break; }
+  for(const f of gjB.features) if(inG(f.geometry)){ out.beat = f.properties.BEAT_NO ?? f.properties.beat ?? f.properties.beat_no ?? ''; break; }
+  for(const f of gjP.features) if(inG(f.geometry)){ out.ps   = f.properties.PS_NAME ?? f.properties.ps_name ?? f.properties.PSNAME ?? ''; break; }
+  return out;
 }
 
 /* ---------- Manual redirect button ---------- */
@@ -415,10 +506,7 @@ function addManualRedirect(url){
   if (box) box.parentNode.insertBefore(btn, box.nextSibling);
 }
 
-// Make sure console is in the right place at start
-document.addEventListener('DOMContentLoaded', ensureConsoleBox);
-
-// Console collapse / copy (UI only)
+/* ---------- Console controls ---------- */
 document.addEventListener('DOMContentLoaded', () => {
   const box = document.getElementById('console-box');
   const toggle = document.getElementById('consoleToggle');
@@ -433,21 +521,13 @@ document.addEventListener('DOMContentLoaded', () => {
       toggle.textContent = expanded ? 'Hide' : 'Show';
     });
   }
-
   if (copyBtn && pre) {
     copyBtn.addEventListener('click', async () => {
       try {
         await navigator.clipboard.writeText(pre.textContent || '');
-        // lightweight toast via banner
         const b = document.getElementById('banner');
-        if (b) {
-          b.className = 'banner info';
-          b.hidden = false;
-          b.textContent = 'Console copied to clipboard.';
-          setTimeout(() => (b.hidden = true), 1500);
-        }
+        if (b) { b.className = 'banner success'; b.hidden = false; b.textContent = 'Console copied to clipboard.'; setTimeout(() => (b.hidden = true), 1600); }
       } catch (_) {}
     });
   }
 });
-

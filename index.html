@@ -22,9 +22,9 @@
       </div>
     </div>
     <div class="hdr-right">
-      <span id="cdnBadge" class="badge badge-info">CDN: v5 (jsDelivr)</span>
+      <span id="cdnBadge" class="badge badge-info">CDN: v5 (Loading…)</span>
+      <span id="geoBadge" class="badge badge-warn">Geo: Loading…</span>
       <button id="btnReset" class="btn btn-danger">Reset</button>
-      <img class="crescendo-logo" src="data/Crescendo-Logo.jpg" alt="Crescendo Innovative Solutions LLP">
     </div>
   </header>
 
@@ -38,7 +38,7 @@
     <button class="pill" id="pill-redirect"><span>Redirect</span><em>(0.0s)</em></button>
   </section>
 
-  <!-- Material banner / update strip -->
+  <!-- Banner -->
   <div id="banner" class="banner info" hidden>Updates will appear here…</div>
 
   <!-- Content -->
@@ -69,7 +69,7 @@
         </div>
       </section>
 
-      <!-- RIGHT: Results + Console -->
+      <!-- RIGHT: Results + Console + BBox debug -->
       <section class="card">
         <h3>Results</h3>
         <div class="results">
@@ -95,17 +95,26 @@
           </div>
           <pre id="console-pre" aria-live="polite">Logs will appear here…</pre>
         </div>
+
+        <!-- BBox Debug Canvas -->
+        <div class="bbox-wrap card-inset">
+          <div class="console-head">
+            <strong>GeoJSON BBoxes</strong>
+            <span class="hint">Overview of polygon bounds + hit point</span>
+          </div>
+          <canvas id="geoCanvas" width="600" height="380" class="bbox-canvas"></canvas>
+        </div>
       </section>
     </div>
   </main>
 
-   <!-- Sticky Footer -->
+  <!-- Sticky Footer (center text) -->
   <footer class="app-footer">
     <div class="ftext">
-      © 2025 Municipal Corporation of Greater Mumbai (MCGM) — 
-      Developed by <strong>Crescendo Innovative Solutions LLP</strong> · 
-      Admin: <a href="mailto:Care@crescendoits.com">Care@crescendoits.com</a> · 
-      <a href="https://www.mcgm.gov.in" target="_blank" rel="noreferrer">www.mcgm.gov.in</a> · 
+      © 2025 Municipal Corporation of Greater Mumbai (MCGM) —
+      Developed by <strong>Crescendo Innovative Solutions LLP</strong> ·
+      Admin: <a href="mailto:Care@crescendoits.com">Care@crescendoits.com</a> ·
+      <a href="https://www.mcgm.gov.in" target="_blank" rel="noreferrer">www.mcgm.gov.in</a> ·
       <span id="buildId">Build: v2025.08.18.Prod</span>
     </div>
   </footer>
