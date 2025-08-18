@@ -2,12 +2,11 @@
    Abandoned Vehicles – Marshal Upload (MCGM)
    Simplified Flow (2025-08-18)
    - Drag & drop + single picker
-   - Crop bottom HUD (left/right trim, adjusted)
-   - OCR (eng/hin/mar)
-   - Parsing rules: ignore line1, use line2–4 for address,
-     second-last = lat/long, last = date/time
-   - GeoJSON lookup from /data
-   - Auto redirect if all good, else enable retry button
+   - Dynamic crop of bottom HUD (no preprocessing)
+   - OCR with Tesseract.js v5 (eng+hin+mar)
+   - Parse rules: ignore line1; address lines 1–3; second-last = lat/long; last = date/time
+   - GeoJSON lookup (wards, beats, police_jurisdiction)
+   - Auto redirect; show manual button if blocked
    ========================================================== */
 
 const el = (id) => document.getElementById(id);
@@ -86,45 +85,51 @@ dropArea.addEventListener('drop', (e) => {
 
 // -------------------- Core Flow --------------------
 async function handleFile(file) {
+  // Step 1: Validate file
   if (!/^image\/(jpe?g|png)$/i.test(file.type)) {
     setBanner('Please choose a JPG or PNG.', 'error');
     return;
   }
 
+  // Reset UI outputs
   resetOutputs();
 
+  // Step 2: Upload image
   setPill('upload', 'run');
   const dataURL = await fileToDataURL(file);
   imgOriginal.src = dataURL;
   setPill('upload', 'ok');
 
+  // Step 3: Crop HUD (bottom GPS overlay)
   setPill('ocr', 'run');
   const cropURL = await cropHud(dataURL);
   imgCrop.src = cropURL;
 
+  // Step 4: OCR (Tesseract.js v5)
   let text = '';
   try {
-    const worker = Tesseract.createWorker('eng+hin+mar', 1, {
-      // PSM 6 = Assume a single uniform block of text (works well for the HUD)
-      tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK,
-      logger: _ => {}
-    });
-    const res = await worker.recognize(cropURL);
-    await worker.terminate();
+    const res = await Tesseract.recognize(
+      cropURL,
+      'eng+hin+mar',
+      {
+        logger: _ => {},
+        tessedit_pageseg_mode: 6 // single uniform block
+      }
+    );
     text = (res?.data?.text || '').trim();
-
     console.log('Raw OCR Text:', text);
     setPill('ocr', 'ok');
   } catch (e) {
+    console.error('Tesseract error:', e);
     setPill('ocr', 'err');
     setBanner('OCR failed. Try clearer photo.', 'error');
     return;
   }
 
+  // Step 5: Parse OCR output
   setPill('parse', 'run');
   const parsed = parseHudText(text);
   console.log('Parsed Fields:', parsed);
-
   if (!parsed.date || !parsed.time || isNaN(parsed.lat) || isNaN(parsed.lon) || !parsed.address) {
     setPill('parse', 'err');
     setBanner('Could not parse all fields from HUD.', 'error');
@@ -132,12 +137,14 @@ async function handleFile(file) {
   }
   setPill('parse', 'ok');
 
+  // Display parsed values
   outDate.textContent = parsed.date;
   outTime.textContent = parsed.time;
   outLat.textContent  = parsed.lat.toFixed(6);
   outLon.textContent  = parsed.lon.toFixed(6);
   outAddr.textContent = parsed.address;
 
+  // Step 6: GeoJSON lookup
   setPill('geo', 'run');
   await ensureGeo();
   const gj = geoLookup(parsed.lat, parsed.lon);
@@ -151,8 +158,10 @@ async function handleFile(file) {
   }
   setPill('geo', 'ok');
 
+  // Step 7: Review complete
   setPill('review', 'ok');
 
+  // Step 8: Redirect / Fallback button
   const url = new URL(FORM_BASE);
   url.searchParams.set(ENTRY.date, parsed.date);
   url.searchParams.set(ENTRY.time, parsed.time);
@@ -174,6 +183,7 @@ async function handleFile(file) {
   }
 }
 
+// Reset outputs between runs
 function resetOutputs() {
   ['upload','ocr','parse','geo','review','redirect'].forEach(k => setPill(k, null));
   [outDate,outTime,outLat,outLon,outAddr,outWard,outBeat,outPS].forEach(o => o.textContent = '—');
@@ -182,6 +192,7 @@ function resetOutputs() {
   setBanner('', 'info');
 }
 
+// Convert file to base64 data URL
 function fileToDataURL(file) {
   return new Promise((resolve, reject) => {
     const fr = new FileReader();
@@ -191,94 +202,77 @@ function fileToDataURL(file) {
   });
 }
 
-// -------------------- Crop Bottom HUD --------------------
-// Dynamically detect the dark HUD band at the bottom (no image preprocessing applied)
-// - Scan bottom 40% to locate the darkest continuous band
-// - Add safe margins so last line (date/time) is fully included
-// - Trim left to avoid Google map inset; expand if we detect strong variance (likely mini-map)
+// -------------------- Dynamic Crop of Bottom HUD --------------------
+// - Scans bottom ~40% to find darkest band (HUD background)
+// - Adds safety margins; trims left to dodge the mini Google map
 async function cropHud(dataURL) {
   const img = await loadImage(dataURL);
   const W = img.naturalWidth, H = img.naturalHeight;
 
-  // Draw full image to a tiny helper canvas to cheaply analyze luminance per row
+  // Helper canvas for fast luminance scan
   const helper = document.createElement('canvas');
-  helper.width = Math.max(200, Math.floor(W * 0.2)); // downscale for speed
+  helper.width = Math.max(200, Math.floor(W * 0.2));
   helper.height = Math.max(200, Math.floor(H * 0.2));
   const hctx = helper.getContext('2d');
   hctx.drawImage(img, 0, 0, helper.width, helper.height);
 
-  const imgData = hctx.getImageData(0, 0, helper.width, helper.height).data;
-  const rows = helper.height;
-  const cols = helper.width;
-
-  // Compute average luminance for each row
+  const data = hctx.getImageData(0, 0, helper.width, helper.height).data;
+  const rows = helper.height, cols = helper.width;
   const luminance = new Array(rows).fill(0);
   for (let y = 0; y < rows; y++) {
     let sum = 0;
     for (let x = 0; x < cols; x++) {
       const i = (y * cols + x) * 4;
-      const r = imgData[i], g = imgData[i+1], b = imgData[i+2];
-      // Rec. 709 luma
-      sum += 0.2126*r + 0.7152*g + 0.0722*b;
+      const r = data[i], g = data[i+1], b = data[i+2];
+      sum += 0.2126*r + 0.7152*g + 0.0722*b; // Rec.709
     }
     luminance[y] = sum / cols;
   }
 
-  // Search only the bottom 40% of rows for a dark band
+  // Search the bottom 40% for the darkest band top
   const startRow = Math.floor(rows * 0.60);
-  let hudTopRow = rows - Math.floor(rows * 0.25); // fallback ≈ bottom 25%
+  let hudTopRow = rows - Math.floor(rows * 0.25); // fallback
   let minAvg = 255;
   for (let y = rows - 1; y >= startRow; y--) {
-    if (luminance[y] < minAvg) {
-      minAvg = luminance[y];
-      hudTopRow = y; // track darkest row seen upwards
-    }
+    if (luminance[y] < minAvg) { minAvg = luminance[y]; hudTopRow = y; }
   }
 
-  // Map helper row back to original image Y
-  let sy = Math.max(0, Math.floor(hudTopRow / rows * H) - Math.floor(H * 0.02)); // add small margin above
-  // Clamp within [0.65H, 0.78H] to avoid accidental over-crop on bright photos
-  sy = Math.min(Math.max(sy, Math.floor(H * 0.65)), Math.floor(H * 0.78));
+  // Map to original image coordinates with margin
+  let sy = Math.max(0, Math.floor(hudTopRow / rows * H) - Math.floor(H * 0.02));
+  sy = Math.min(Math.max(sy, Math.floor(H * 0.65)), Math.floor(H * 0.78)); // clamp
 
-  // Height: ensure we include full HUD (prefer 28–35% of H)
+  // Height ~32% (clamped to bottom)
   let sh = Math.floor(H * 0.32);
-  if (sy + sh > H) sh = H - sy; // clamp to bottom
+  if (sy + sh > H) sh = H - sy;
 
-  // Left trim: default 24%, but expand to 30% if left-bottom region shows high variance (likely Google map inset)
+  // Left trim detection (mini map)
   let sx = Math.floor(W * 0.24);
-  const leftProbeW = Math.floor(cols * 0.18);
-  const leftProbeY0 = Math.floor(rows * 0.82);
-  let leftSum = 0, leftSum2 = 0, n = 0;
-  for (let y = leftProbeY0; y < rows; y++) {
-    for (let x = 0; x < leftProbeW; x++) {
-      const i = (y * cols + x) * 4;
-      const r = imgData[i], g = imgData[i+1], b = imgData[i+2];
-      const L = 0.2126*r + 0.7152*g + 0.0722*b;
-      leftSum += L; leftSum2 += L*L; n++;
+  const probeW = Math.floor(cols * 0.18), probeY0 = Math.floor(rows * 0.82);
+  let s=0, s2=0, n=0;
+  for (let y = probeY0; y < rows; y++) {
+    for (let x = 0; x < probeW; x++) {
+      const i = (y*cols + x)*4;
+      const L = 0.2126*data[i] + 0.7152*data[i+1] + 0.0722*data[i+2];
+      s += L; s2 += L*L; n++;
     }
   }
-  const leftMean = leftSum / Math.max(1,n);
-  const leftVar = leftSum2/Math.max(1,n) - leftMean*leftMean;
-  if (leftVar > 1500) { // heuristic: busy tile -> likely mini-map
-    sx = Math.floor(W * 0.30);
-  }
+  const mean = s/Math.max(1,n);
+  const variance = s2/Math.max(1,n) - mean*mean;
+  if (variance > 1500) sx = Math.floor(W * 0.30);
 
-  // Right trim: keep tiny padding to avoid overlay watermark
   const rightPad = Math.floor(W * 0.02);
   const sw = W - sx - rightPad;
 
-  // Draw final crop
   const c = document.createElement('canvas');
   c.width = sw; c.height = sh;
   const ctx = c.getContext('2d');
   ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
 
-  // Debug: show chosen crop metrics
-  console.log('Crop metrics:', { sx, sy, sw, sh, W, H, leftVar: Math.round(leftVar) });
-
+  console.log('Crop metrics:', { sx, sy, sw, sh, W, H, variance: Math.round(variance) });
   return c.toDataURL('image/png');
 }
 
+// Helper: load image
 function loadImage(url) {
   return new Promise((res, rej) => {
     const im = new Image();
@@ -289,24 +283,25 @@ function loadImage(url) {
 }
 
 // -------------------- Parsing --------------------
+// Parse OCR lines into address, lat/lon, date/time
 function parseHudText(raw) {
   const lines = raw.split(/\n/).map(l => l.trim()).filter(Boolean);
   if (lines.length < 3) return {};
 
-  const last = lines[lines.length - 1];
-  const prev = lines[lines.length - 2];
-  const addrLines = lines.slice(1, lines.length - 2);
+  const last = lines[lines.length - 1]; // date/time
+  const prev = lines[lines.length - 2]; // lat/lon
+  const addrLines = lines.slice(1, lines.length - 2); // address 1–3 lines
   const address = addrLines.join(', ');
 
   const latM = prev.match(/Lat[^0-9]*([+-]?[0-9]+\.?[0-9]*)/i);
   const lonM = prev.match(/Long[^0-9]*([+-]?[0-9]+\.?[0-9]*)/i);
-  let lat = latM ? parseFloat(latM[1]) : NaN;
-  let lon = lonM ? parseFloat(lonM[1]) : NaN;
+  const lat = latM ? parseFloat(latM[1]) : NaN;
+  const lon = lonM ? parseFloat(lonM[1]) : NaN;
 
   let date = '', time = '';
   const dt = last.replace(/GMT.*$/,'').trim();
   const m = dt.match(/(\d{1,2}\/\d{1,2}\/\d{4})\s+(\d{1,2}:\d{2}(?:\s*[AP]M)?)/)
-         || dt.match(/(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2}(?:\s*[AP]M)?)/);
+        || dt.match(/(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2}(?:\s*[AP]M)?)/);
   if (m) { date = m[1]; time = m[2]; }
 
   return { address, lat, lon, date, time };
