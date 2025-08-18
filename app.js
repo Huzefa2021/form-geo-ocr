@@ -1,574 +1,386 @@
 /* -----------------------------------------------------------
    MCGM | Abandoned Vehicles — Marshal Upload
-   Robust client OCR pipeline (no hard failures)
-   v2025.08.18.R2
+   Robust client OCR pipeline + stable DnD/click binding
+   v2025.08.18.R3
 ------------------------------------------------------------*/
-
 (() => {
-  // ---------- CONFIG ----------
-  const CFG = {
-    // Crop passes (fractions of image height)
-    FIXED_BOTTOM_RATIO: 0.26,         // default HUD band height
-    WIDE_BOTTOM_RATIO: 0.34,          // wider fallback band height
-    SMART_SEARCH_WINDOW: 0.38,        // search bottom 38% for darkest bar
-    LEFT_TRIM_RATIO: 0.18,            // try trimming left 18% to hide mini map
-    MIN_HUD_HEIGHT_PX: 160,           // minimum band height in pixels
-    MAX_OCR_SECONDS: 35,              // soft budget
-    OCR_LANG: 'eng+hin',              // robust + includes Devanagari; avoids "mar" 404
-    REDIRECT_ON_SUCCESS: true,        // flip to false if you want manual only
-    FORM_URL_TEMPLATE:
-      'https://docs.google.com/forms/d/e/1FAIpQLSeo-xlOSxvG0IwtO5MkKaTJZNJkgTsmgZUw-FBsntFlNdRnCw/viewform?usp=pp_url' +
-      '&entry.1911996449={DATE}' +        // date (YYYY-MM-DD)
-      '&entry.1421115881={TIME}' +        // time (HH:mm)
-      '&entry.113122688={LON}' +          // 1 -> long
-      '&entry.419288992={LAT}' +          // 2 -> lat
-      '&entry.1625337207={WARD}' +        // 3 -> ward
-      '&entry.1058310891={BEAT}' +        // 4 -> beat
-      '&entry.1188611077={ADDR}' +        // 5 -> address
-      '&entry.1555105834={PS}',           // 6 -> police station
+  if (window.__mcgm_bound) return; // prevent double binding in hot reloads
+  window.__mcgm_bound = true;
 
-    // Mumbai plausibility for float-only fallback
-    LAT_RANGE: [18.0, 20.5],
-    LON_RANGE: [72.0, 73.5]
-  };
-
-  // ---------- UI ELEMENTS ----------
+  // ---------- SHORTHANDS ----------
+  const $ = s => document.querySelector(s);
   const el = {
-    file: document.getElementById('file'),
-    dropZone: document.getElementById('drop-zone'),
-    originalPreview: document.getElementById('original-preview'),
-    hudPreview: document.getElementById('hud-preview'),
-
-    // results
-    rDate: qs('#r-date'), rTime: qs('#r-time'),
-    rLat: qs('#r-lat'), rLon: qs('#r-lon'),
-    rAddr: qs('#r-addr'), rWard: qs('#r-ward'),
-    rBeat: qs('#r-beat'), rPS: qs('#r-ps'),
-
-    // pills
-    pillUpload: qs('[data-pill="upload"]'),
-    pillOCR: qs('[data-pill="ocr"]'),
-    pillParse: qs('[data-pill="parse"]'),
-    pillGeo: qs('[data-pill="geo"]'),
-    pillReview: qs('[data-pill="review"]'),
-    pillRedirect: qs('[data-pill="redirect"]'),
-
-    banner: document.getElementById('banner'), // inline message area
+    file: $('#file'),
+    drop: $('#drop-zone'),
+    original: $('#original-preview'),
+    hud: $('#hud-preview'),
+    rDate: $('#r-date'), rTime: $('#r-time'),
+    rLat: $('#r-lat'), rLon: $('#r-lon'),
+    rAddr: $('#r-addr'), rWard: $('#r-ward'),
+    rBeat: $('#r-beat'), rPS: $('#r-ps'),
+    banner: $('#banner'),
+    btnReset: $('#btn-reset')
   };
-
-  function qs(s) { return document.querySelector(s); }
-
-  // ---------- STATUS / TIMER ----------
-  const t0 = {};
   const pills = {
-    upload: el.pillUpload,
-    ocr: el.pillOCR,
-    parse: el.pillParse,
-    geo: el.pillGeo,
-    review: el.pillReview,
-    redirect: el.pillRedirect
+    upload: $('[data-pill="upload"]'),
+    ocr: $('[data-pill="ocr"]'),
+    parse: $('[data-pill="parse"]'),
+    geo: $('[data-pill="geo"]'),
+    review: $('[data-pill="review"]'),
+    redirect: $('[data-pill="redirect"]')
   };
 
-  function pillPending(name)  { setPill(name, 'pending'); t0[name] = performance.now(); }
-  function pillOk(name)       { finalizePill(name, 'ok'); }
-  function pillErr(name)      { finalizePill(name, 'err'); }
-
-  function finalizePill(name, state) {
-    const ms = (performance.now() - (t0[name] || performance.now())).toFixed(0);
-    const s = (ms/1000).toFixed(1) + 's';
-    setPill(name, state, s);
+  // ---------- PILL HELPERS ----------
+  const t0 = {};
+  function pill(name, state, t) {
+    const p = pills[name]; if (!p) return;
+    p.classList.remove('pill--ok','pill--err','pill--pending');
+    p.classList.add(`pill--${state}`);
+    const tt = p.querySelector('.pill__time'); if (tt) tt.textContent = t ? `(${t})` : '';
   }
+  function start(name){ t0[name] = performance.now(); pill(name,'pending'); }
+  function ok(name){ pill(name,'ok', fmtTime(name)); }
+  function err(name){ pill(name,'err', fmtTime(name)); }
+  function fmtTime(name){ const ms = (performance.now() - (t0[name]||performance.now())); return (ms/1000).toFixed(1)+'s';}
 
-  function setPill(name, state, timeLabel) {
-    const pill = pills[name];
-    if (!pill) return;
-    pill.classList.remove('pill--ok','pill--err','pill--pending');
-    pill.classList.add('pill--' + state);
-    const tag = pill.querySelector('.pill__time');
-    if (timeLabel && tag) tag.textContent = `(${timeLabel})`;
-  }
-
-  function banner(msg, kind='info') {
-    if (!el.banner) return;
+  function setBanner(msg, kind='info'){
     el.banner.textContent = msg;
     el.banner.className = `banner banner--${kind}`;
-    el.banner.hidden = false;
-    // auto hide informational banners
-    if (kind === 'info') {
-      clearTimeout(banner._to);
-      banner._to = setTimeout(() => { el.banner.hidden = true; }, 3500);
-    }
+    el.banner.hidden = !msg;
   }
 
-  // ---------- UTIL: IMAGE LOADING ----------
-  function readFileAsDataURL(file) {
-    return new Promise((res, rej) => {
-      const fr = new FileReader();
-      fr.onload = () => res(fr.result);
-      fr.onerror = rej;
-      fr.readAsDataURL(file);
-    });
+  // ---------- CONFIG ----------
+  const CFG = {
+    FIXED_BOTTOM_RATIO: 0.26,
+    WIDE_BOTTOM_RATIO: 0.34,
+    SMART_SEARCH_WINDOW: 0.38,
+    LEFT_TRIM_RATIO: 0.18,
+    MIN_HUD_HEIGHT_PX: 160,
+    OCR_LANG: 'eng+hin',
+    LAT_RANGE: [18.0, 20.5],
+    LON_RANGE: [72.0, 73.5],
+    FORM:
+      'https://docs.google.com/forms/d/e/1FAIpQLSeo-xlOSxvG0IwtO5MkKaTJZNJkgTsmgZUw-FBsntFlNdRnCw/viewform?usp=pp_url' +
+      '&entry.1911996449={DATE}&entry.1421115881={TIME}&entry.113122688={LON}&entry.419288992={LAT}' +
+      '&entry.1625337207={WARD}&entry.1058310891={BEAT}&entry.1188611077={ADDR}&entry.1555105834={PS}',
+    AUTO_REDIRECT: true
+  };
+
+  // ---------- FILE + DND BINDINGS ----------
+  // Allow dropping anywhere on page without browser navigating
+  ['dragenter','dragover','dragleave','drop'].forEach(ev => {
+    document.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); }, false);
+  });
+
+  // Drop zone visuals + behavior
+  el.drop.addEventListener('dragenter', () => el.drop.classList.add('dz--over'));
+  el.drop.addEventListener('dragover',  () => el.drop.classList.add('dz--over'));
+  el.drop.addEventListener('dragleave', () => el.drop.classList.remove('dz--over'));
+  el.drop.addEventListener('drop', async (e) => {
+    el.drop.classList.remove('dz--over');
+    const f = e.dataTransfer?.files?.[0];
+    if (f) await process(f);
+  });
+
+  // Single click opens chooser (no double chooser)
+  el.drop.addEventListener('click', () => el.file.click());
+  el.file.addEventListener('change', async e => {
+    const f = e.target.files?.[0];
+    if (f) await process(f);
+    el.file.value = ''; // clear to avoid "same file" not firing
+  });
+
+  // Reset
+  el.btnReset.addEventListener('click', () => {
+    resetUI();
+    setBanner('Cleared.', 'info');
+  });
+
+  // ---------- IMAGE LOADING ----------
+  function readAsDataURL(file){
+    return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=rej; fr.readAsDataURL(file);});
+  }
+  function loadImage(src){
+    return new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=src; });
+  }
+  function drawCrop(img,x,y,w,h){
+    const c=document.createElement('canvas'); c.width=w; c.height=h;
+    c.getContext('2d').drawImage(img,x,y,w,h,0,0,w,h); return c;
   }
 
-  function loadImage(src) {
-    return new Promise((res, rej) => {
-      const img = new Image();
-      img.onload = () => res(img);
-      img.onerror = rej;
-      img.src = src;
-    });
-  }
-
-  function drawCrop(img, x, y, w, h) {
-    const c = document.createElement('canvas');
-    c.width = w; c.height = h;
-    const g = c.getContext('2d');
-    g.drawImage(img, x, y, w, h, 0, 0, w, h);
-    return c;
-  }
-
-  // Smart HUD finder (largest dark band near bottom)
-  function smartHudBand(img) {
-    const H = img.height, W = img.width;
-    const g = drawCrop(img, 0, 0, W, H).getContext('2d');
-    const data = g.getImageData(0, 0, W, H).data;
-
-    const startY = Math.floor(H * (1 - CFG.SMART_SEARCH_WINDOW));
-    const bandHeights = [
-      Math.max(Math.floor(H * CFG.FIXED_BOTTOM_RATIO), CFG.MIN_HUD_HEIGHT_PX),
-      Math.max(Math.floor(H * CFG.WIDE_BOTTOM_RATIO), CFG.MIN_HUD_HEIGHT_PX)
+  // ---------- SMART CROPS ----------
+  function smartHudBand(img){
+    const H=img.height, W=img.width;
+    const full = drawCrop(img,0,0,W,H); const ctx=full.getContext('2d');
+    const pix = ctx.getImageData(0,0,W,H).data;
+    const startY = Math.floor(H*(1-CFG.SMART_SEARCH_WINDOW));
+    const heights = [
+      Math.max(Math.floor(H*CFG.FIXED_BOTTOM_RATIO), CFG.MIN_HUD_HEIGHT_PX),
+      Math.max(Math.floor(H*CFG.WIDE_BOTTOM_RATIO),  CFG.MIN_HUD_HEIGHT_PX)
     ];
-
-    let best = null;
-
-    for (const bh of bandHeights) {
-      const windowH = Math.min(bh, H - startY);
-      // slide from bottom upwards inside the search region
-      const steps = 14;
-      for (let i=0; i<=steps; i++) {
-        const yTop = H - windowH - Math.floor((i/steps) * (H - startY - windowH));
-        // score darkness & uniformity
-        const score = scoreBandDarkness(data, W, H, yTop, windowH);
-        if (!best || score > best.score) {
-          best = { y: yTop, h: windowH, score };
-        }
+    let best=null;
+    for(const bh of heights){
+      const steps=14, maxTop=H-bh;
+      for(let i=0;i<=steps;i++){
+        const y = Math.max(startY, maxTop - Math.floor(i*(maxTop-startY)/steps));
+        const s = scoreBand(pix,W,H,y,bh);
+        if(!best || s>best.score) best={y,h:bh,score:s};
       }
     }
-    return best; // {y,h,score}
+    return best;
   }
-
-  function scoreBandDarkness(pix, W, H, yTop, bh) {
-    let dark = 0, total = 0, edges = 0;
-    const yEnd = yTop + bh;
-    for (let y = yTop; y < yEnd; y+=2) {
-      const row = y * W * 4;
-      for (let x = 0; x < W; x+=2) {
-        const i = row + x*4;
-        const r = pix[i], g = pix[i+1], b = pix[i+2];
-        // luminance
-        const Y = 0.2126*r + 0.7152*g + 0.0722*b;
-        if (Y < 70) dark++;
-        total++;
+  function scoreBand(pix,W,H,top,bh){
+    let dark=0,tot=0;
+    for(let y=top;y<top+bh;y+=2){
+      const row=y*W*4;
+      for(let x=0;x<W;x+=2){
+        const i=row+x*4; const r=pix[i],g=pix[i+1],b=pix[i+2];
+        const Y=0.2126*r+0.7152*g+0.0722*b;
+        if(Y<70) dark++; tot++;
       }
     }
-    // density of dark pixels
-    const density = dark / Math.max(1,total);
-    // prefer wider bars with more darkness
-    return density;
+    return dark/Math.max(1,tot);
   }
-
-  function fixedBottomBand(img, ratio) {
-    const H = img.height, W = img.width;
-    const bh = Math.max(Math.floor(H * ratio), CFG.MIN_HUD_HEIGHT_PX);
-    return { y: H - bh, h: bh };
+  function fixedBand(img,ratio){
+    const H=img.height, W=img.width;
+    const bh=Math.max(Math.floor(H*ratio), CFG.MIN_HUD_HEIGHT_PX);
+    return {y:H-bh,h:bh,w:W,x:0};
   }
-
-  // Try several crops and return them (full + left-trimmed)
-  function buildCandidateCrops(img) {
-    const W = img.width, H = img.height;
-    const crops = [];
-    // 1) Smart band
-    const smart = smartHudBand(img);
-    if (smart) crops.push({x:0, y:smart.y, w:W, h:smart.h, reason:'smart'});
-
-    // 2) Fixed bottom
-    const fixed = fixedBottomBand(img, CFG.FIXED_BOTTOM_RATIO);
-    crops.push({x:0, y:fixed.y, w:W, h:fixed.h, reason:'fixed'});
-
-    // 3) Wide fallback
-    const wide = fixedBottomBand(img, CFG.WIDE_BOTTOM_RATIO);
-    crops.push({x:0, y:wide.y, w:W, h:wide.h, reason:'wide'});
-
-    // Produce left-trim variants for each
-    const out = [];
-    for (const c of crops) {
-      const c1 = {...c, leftTrim: 0};
-      const c2 = {...c, leftTrim: Math.floor(W * CFG.LEFT_TRIM_RATIO)};
-      out.push(c1, c2);
-    }
-    return out;
+  function candidates(img){
+    const c=[], W=img.width;
+    const s=smartHudBand(img); if(s) c.push({x:0,y:s.y,w:W,h:s.h,tag:'smart'});
+    const f=fixedBand(img, CFG.FIXED_BOTTOM_RATIO); c.push({...f,tag:'fixed'});
+    const w=fixedBand(img, CFG.WIDE_BOTTOM_RATIO);  c.push({...w,tag:'wide'});
+    // add left-trim variants
+    return c.flatMap(o => [o, {...o, x:Math.floor(W*CFG.LEFT_TRIM_RATIO), w: o.w - Math.floor(W*CFG.LEFT_TRIM_RATIO), tag:o.tag+'+trim'}]);
   }
 
   // ---------- OCR ----------
-  let workerPromise = null;
-  function getWorker() {
+  let workerPromise=null;
+  function worker(){
     if (workerPromise) return workerPromise;
-    pillOCR && pillPending('ocr');
-    workerPromise = Tesseract.createWorker({
-      logger: m => { /* could stream progress to UI if needed */ }
-    }).then(async w => {
-      await w.loadLanguage(CFG.OCR_LANG);
-      await w.initialize(CFG.OCR_LANG);
-      pillOk('ocr');
-      return w;
-    }).catch(e => {
-      pillErr('ocr');
-      banner('OCR engine failed to initialize. Check network / CDN.', 'error');
-      throw e;
-    });
+    start('ocr');
+    workerPromise = Tesseract.createWorker({ logger: ()=>{} })
+      .then(async w => { await w.loadLanguage(CFG.OCR_LANG); await w.initialize(CFG.OCR_LANG); ok('ocr'); return w; })
+      .catch(e => { err('ocr'); setBanner('Failed to initialize OCR. Check CDN/network.', 'error'); throw e; });
     return workerPromise;
   }
-
-  async function runOCR(canvas) {
-    const w = await getWorker();
-    const { data: { text } } = await w.recognize(canvas);
+  async function ocr(canvas){
+    const w = await worker();
+    const { data:{ text } } = await w.recognize(canvas);
     return text || '';
   }
 
   // ---------- PARSE ----------
-  function normalize(text) {
-    return text
-      .replace(/\u00B0/g, '°')
-      .replace(/[|]+/g, 'I')
-      .replace(/[“”]/g, '"')
-      .replace(/[’‘]/g, "'")
-      .replace(/[—–]/g, '-')
-      .replace(/\u00A0/g, ' ')
-      .replace(/\s+$/gm, '')
-      .trim();
-  }
+  const norm = s => s.replace(/\u00B0/g,'°').replace(/\u00A0/g,' ').replace(/[“”]/g,'"').replace(/[’‘]/g,"'").replace(/[—–]/g,'-').trim();
+  const plausible = (v,[lo,hi]) => Number.isFinite(+v) && +v>=lo && +v<=hi;
 
-  function plausible(v, [lo, hi]) {
-    const n = Number(v);
-    return Number.isFinite(n) && n >= lo && n <= hi;
-  }
-
-  function parseHud(text) {
-    const out = {
-      date: '', time: '', lat: '', lon: '', address: ''
-    };
-    const lines = normalize(text).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-
+  function parseHUD(raw){
+    const lines = norm(raw).split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+    const out = {date:'', time:'', lat:'', lon:'', address:''};
     if (!lines.length) return out;
 
-    // Strip first line (city/country banner)
-    let idx = 1;
-
-    // Collect address lines until we see Lat/Long or time/date
-    const addrParts = [];
-    while (idx < lines.length) {
-      const L = lines[idx];
-      if (/^lat/i.test(L) || /^long/i.test(L) || /GMT/i.test(L) || /\d{1,2}\s*:\s*\d{2}/i.test(L)) break;
-      addrParts.push(L);
-      idx++;
-      if (addrParts.length >= 2) break; // usually at most two lines
+    let i=1; // skip first line (city/country)
+    const addr=[];
+    for(; i<lines.length; i++){
+      const L=lines[i];
+      if (/^lat/i.test(L) || /^lon/i.test(L) || /GMT/i.test(L) || /\d{1,2}\s*:\s*\d{2}/i.test(L)) break;
+      addr.push(L); if (addr.length>=2) { i++; break; } // keep at most 2 lines
     }
 
-    // Seek lat/lon anywhere in remaining lines
-    const rest = lines.slice(idx).join(' • ');
+    const tail = lines.slice(i).join(' • ');
+    // lat/lon labeled
+    const mLat = tail.match(/lat(?:itude)?[:\s]*([+-]?\d{1,2}\.\d{3,7})/i);
+    const mLon = tail.match(/lon(?:g(?:itude)?)?[:\s]*([+-]?\d{1,3}\.\d{3,7})/i);
+    let lat = mLat?.[1]||'', lon = mLon?.[1]||'';
 
-    // Patterns
-    const rLat = /lat(?:itude)?[:\s]*([+-]?\d{1,2}\.\d{3,7})/i;
-    const rLon = /lon(?:g(?:itude)?)?[:\s]*([+-]?\d{1,3}\.\d{3,7})/i;
-
-    let lat = (rest.match(rLat) || [])[1] || '';
-    let lon = (rest.match(rLon) || [])[1] || '';
-
-    // Fallback: find any floats and map by Mumbai ranges
+    // unlabeled floats fallback
     if (!lat || !lon) {
-      const floats = rest.match(/[-+]?\d{1,3}\.\d{3,7}/g) || [];
-      // try pairwise
-      for (let i=0; i<floats.length; i++) {
-        for (let j=i+1; j<floats.length; j++) {
-          const a = +floats[i], b = +floats[j];
-          const c1 = plausible(a, CFG.LAT_RANGE) && plausible(b, CFG.LON_RANGE);
-          const c2 = plausible(b, CFG.LAT_RANGE) && plausible(a, CFG.LON_RANGE);
-          if (c1) { lat = floats[i]; lon = floats[j]; break; }
-          if (c2) { lat = floats[j]; lon = floats[i]; break; }
+      const floats = tail.match(/[-+]?\d{1,3}\.\d{3,7}/g) || [];
+      for(let a=0;a<floats.length;a++){
+        for(let b=a+1;b<floats.length;b++){
+          const A=+floats[a], B=+floats[b];
+          const c1 = plausible(A,CFG.LAT_RANGE)&&plausible(B,CFG.LON_RANGE);
+          const c2 = plausible(B,CFG.LAT_RANGE)&&plausible(A,CFG.LON_RANGE);
+          if(c1){ lat=floats[a]; lon=floats[b]; break; }
+          if(c2){ lat=floats[b]; lon=floats[a]; break; }
         }
-        if (lat && lon) break;
+        if(lat&&lon) break;
       }
     }
 
-    // Time & Date (last line normally)
-    const dateTime = lines[lines.length - 1];
-    let time = '', date = '';
-    // e.g., 18/08/2025 11:52 AM GMT +05:30
-    const mdt = dateTime.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\s+(\d{1,2}:\d{2}\s*[AP]M)/i);
-    if (mdt) {
-      date = mdt[1];
-      time = mdt[2];
-    } else {
-      // try anywhere
-      const any = rest.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}).*?(\d{1,2}:\d{2}\s*[AP]M)/i);
-      if (any) { date = any[1]; time = any[2]; }
+    // time/date from last line
+    const last = lines[lines.length-1];
+    let m = last.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\s+(\d{1,2}:\d{2}\s*[AP]M)/i);
+    if(!m){
+      m = tail.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}).*?(\d{1,2}:\d{2}\s*[AP]M)/i);
     }
+    const date = m?.[1] || '';
+    const time = m?.[2] || '';
 
-    out.address = addrParts.join(', ');
-    out.lat = lat || '';
-    out.lon = lon || '';
+    out.address = addr.join(', ');
+    out.lat = lat; out.lon = lon;
     out.date = toIsoDate(date);
     out.time = toIsoTime(time);
     return out;
   }
-
-  function toIsoDate(d) {
-    // input: dd/mm/yyyy or dd-mm-yyyy
-    if (!d) return '';
-    const m = d.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
-    if (!m) return '';
-    const [ , dd, mm, yy ] = m;
-    const yyyy = (+yy < 100) ? ('20' + yy) : yy;
-    return `${yyyy.padStart(4,'0')}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+  function toIsoDate(d){
+    if(!d) return '';
+    const m=d.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+    if(!m) return '';
+    const [ ,dd,mm,yy]=m; const yyyy=(+yy<100)?('20'+yy):yy;
+    return `${String(yyyy).padStart(4,'0')}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
   }
-  function toIsoTime(t) {
-    if (!t) return '';
-    // 11:52 AM -> 11:52, 03:05 PM -> 15:05
-    const m = t.match(/(\d{1,2}):(\d{2})\s*([AP]M)/i);
-    if (!m) return '';
-    let hh = +m[1], mm = m[2], ap = m[3].toUpperCase();
-    if (ap === 'PM' && hh < 12) hh += 12;
-    if (ap === 'AM' && hh === 12) hh = 0;
-    return `${String(hh).padStart(2,'0')}:${mm}`;
+  function toIsoTime(t){
+    if(!t) return '';
+    const m=t.match(/(\d{1,2}):(\d{2})\s*([AP]M)/i); if(!m) return '';
+    let h=+m[1], min=m[2], ap=m[3].toUpperCase();
+    if(ap==='PM'&&h<12) h+=12; if(ap==='AM'&&h===12) h=0;
+    return `${String(h).padStart(2,'0')}:${min}`;
   }
 
   // ---------- GEO LOOKUP ----------
-  let wardsGeo = null, beatsGeo = null, psGeo = null;
-
-  async function loadGeoOnce() {
-    if (wardsGeo && beatsGeo && psGeo) return;
-    pillPending('geo');
-    try {
-      const [w,b,p] = await Promise.all([
-        fetch('wards.geojson').then(r=>r.json()),
-        fetch('beats.geojson').then(r=>r.json()),
-        fetch('police_jurisdiction.geojson').then(r=>r.json())
-      ]);
-      wardsGeo = w; beatsGeo = b; psGeo = p;
-      pillOk('geo');
-    } catch (e) {
-      pillErr('geo'); banner('Failed to load GeoJSON lookups.', 'error');
-    }
-  }
-
-  function pointIn(poly, x, y) {
-    // ray-casting
-    let inside = false;
-    for (const ring of poly) {
-      const coords = ring; // [ [lon,lat], ... ]
-      for (let i=0, j=coords.length-1; i<coords.length; j=i++) {
-        const xi = coords[i][0], yi = coords[i][1];
-        const xj = coords[j][0], yj = coords[j][1];
-        const intersect = ((yi > y) !== (yj > y)) &&
-                          (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
-        if (intersect) inside = !inside;
+  let gjW=null, gjB=null, gjP=null;
+  function pointIn(poly,x,y){
+    let inside=false;
+    for(const ring of poly){
+      for(let i=0,j=ring.length-1;i<ring.length;j=i++){
+        const xi=ring[i][0], yi=ring[i][1], xj=ring[j][0], yj=ring[j][1];
+        const inter = ((yi>y)!==(yj>y)) && (x < (xj-xi)*(y-yi)/(yj-yi)+xi);
+        if(inter) inside=!inside;
       }
     }
     return inside;
   }
+  async function ensureGeo(){
+    if(gjW&&gjB&&gjP) return;
+    start('geo');
+    try{
+      const [a,b,c] = await Promise.all([
+        fetch('wards.geojson').then(r=>r.json()),
+        fetch('beats.geojson').then(r=>r.json()),
+        fetch('police_jurisdiction.geojson').then(r=>r.json()),
+      ]);
+      gjW=a; gjB=b; gjP=c; ok('geo');
+    }catch(e){ err('geo'); setBanner('Failed to load GeoJSON.', 'error'); }
+  }
+  function geoLookup(lat,lon){
+    const LON=+lon, LAT=+lat; const out={ward:'',beat:'',ps:''};
+    if(!Number.isFinite(LON)||!Number.isFinite(LAT)) return out;
 
-  function lookupGeo(lat, lon) {
-    if (!wardsGeo || !beatsGeo || !psGeo) return {};
-    const out = {ward:'', beat:'', ps:''};
-
-    const LON = +lon, LAT = +lat;
-    if (!Number.isFinite(LON) || !Number.isFinite(LAT)) return out;
-
-    // Wards
-    for (const f of wardsGeo.features || []) {
-      const g = f.geometry;
-      if (!g) continue;
-      if (g.type === 'Polygon') {
-        if (pointIn(g.coordinates, LON, LAT)) { out.ward = f.properties?.WARD || f.properties?.name || ''; break; }
-      } else if (g.type === 'MultiPolygon') {
-        for (const poly of g.coordinates) {
-          if (pointIn(poly, LON, LAT)) { out.ward = f.properties?.WARD || f.properties?.name || ''; break; }
-        }
-        if (out.ward) break;
-      }
+    // wards
+    for(const f of gjW.features||[]){
+      const g=f.geometry; if(!g) continue;
+      if(g.type==='Polygon'){ if(pointIn(g.coordinates,LON,LAT)){ out.ward=f.properties?.WARD||f.properties?.name||''; break; } }
+      else if(g.type==='MultiPolygon'){ for(const poly of g.coordinates){ if(pointIn(poly,LON,LAT)){ out.ward=f.properties?.WARD||f.properties?.name||''; break; } } if(out.ward)break; }
     }
-    // Beats
-    for (const f of beatsGeo.features || []) {
-      const g = f.geometry; if (!g) continue;
-      if (g.type === 'Polygon') {
-        if (pointIn(g.coordinates, LON, LAT)) { out.beat = f.properties?.BEAT || f.properties?.name || ''; break; }
-      } else if (g.type === 'MultiPolygon') {
-        for (const poly of g.coordinates) {
-          if (pointIn(poly, LON, LAT)) { out.beat = f.properties?.BEAT || f.properties?.name || ''; break; }
-        }
-        if (out.beat) break;
-      }
+    // beats
+    for(const f of gjB.features||[]){
+      const g=f.geometry; if(!g) continue;
+      if(g.type==='Polygon'){ if(pointIn(g.coordinates,LON,LAT)){ out.beat=f.properties?.BEAT||f.properties?.name||''; break; } }
+      else if(g.type==='MultiPolygon'){ for(const poly of g.coordinates){ if(pointIn(poly,LON,LAT)){ out.beat=f.properties?.BEAT||f.properties?.name||''; break; } } if(out.beat)break; }
     }
-    // Police
-    for (const f of psGeo.features || []) {
-      const g = f.geometry; if (!g) continue;
-      if (g.type === 'Polygon') {
-        if (pointIn(g.coordinates, LON, LAT)) { out.ps = f.properties?.PS || f.properties?.name || ''; break; }
-      } else if (g.type === 'MultiPolygon') {
-        for (const poly of g.coordinates) {
-          if (pointIn(poly, LON, LAT)) { out.ps = f.properties?.PS || f.properties?.name || ''; break; }
-        }
-        if (out.ps) break;
-      }
+    // PS
+    for(const f of gjP.features||[]){
+      const g=f.geometry; if(!g) continue;
+      if(g.type==='Polygon'){ if(pointIn(g.coordinates,LON,LAT)){ out.ps=f.properties?.PS||f.properties?.name||''; break; } }
+      else if(g.type==='MultiPolygon'){ for(const poly of g.coordinates){ if(pointIn(poly,LON,LAT)){ out.ps=f.properties?.PS||f.properties?.name||''; break; } } if(out.ps)break; }
     }
     return out;
   }
 
-  // ---------- MAIN FLOW ----------
-  attachDnD(el.dropZone);
-  el.file.addEventListener('change', onPicked);
+  // ---------- PROCESS ----------
+  async function process(file){
+    try{
+      resetUI();
+      start('upload');
 
-  function attachDnD(zone) {
-    ;['dragenter','dragover'].forEach(ev =>
-      zone.addEventListener(ev, e => { e.preventDefault(); zone.classList.add('dz--over'); })
-    );
-    ;['dragleave','drop'].forEach(ev =>
-      zone.addEventListener(ev, e => { e.preventDefault(); zone.classList.remove('dz--over'); })
-    );
-    zone.addEventListener('drop', async e => {
-      const file = e.dataTransfer.files && e.dataTransfer.files[0];
-      if (file) await processFile(file);
-    });
-    zone.addEventListener('click', () => el.file.click());
-  }
-
-  async function onPicked(e) {
-    const file = e.target.files && e.target.files[0];
-    if (file) await processFile(file);
-  }
-
-  async function processFile(file) {
-    resetUI();
-    pillPending('upload');
-
-    try {
-      if (!/^image\/(jpe?g|png)$/i.test(file.type)) {
-        pillErr('upload'); banner('Please upload a JPG or PNG.', 'error'); return;
+      if(!/^image\/(jpe?g|png)$/i.test(file.type)){
+        err('upload'); setBanner('Please upload a JPG or PNG.', 'error'); return;
       }
-      const url = await readFileAsDataURL(file);
+      const url = await readAsDataURL(file);
       const img = await loadImage(url);
-      el.originalPreview.src = url;
-      pillOk('upload');
+      el.original.src = url;
+      ok('upload');
 
-      // Build candidates and attempt OCR on each until we get a good parse
-      await loadGeoOnce();
-      const candidates = buildCandidateCrops(img);
+      await ensureGeo();
 
-      let best = null;
-
-      pillPending('ocr');
-      for (const c of candidates) {
-        const x = Math.max(0, c.x + (c.leftTrim || 0));
-        const w = c.w - (c.leftTrim || 0);
-        const canvas = drawCrop(img, x, c.y, w, c.h);
-        // Light enhancement (no heavy preprocessing to keep fidelity)
-        const txt = await runOCR(canvas);
-        const parsed = parseHud(txt);
-        const score = scoreParse(parsed);
-
-        if (!best || score > best.score) {
-          best = { canvas, parsed, score, reason: c.reason, leftTrim: c.leftTrim || 0, raw: txt };
-        }
+      // OCR on multiple candidate crops
+      start('ocr');
+      const cands = candidates(img);
+      let best=null;
+      for(const c of cands){
+        const canvas = drawCrop(img, c.x, c.y, c.w, c.h);
+        const text = await ocr(canvas);
+        const parsed = parseHUD(text);
+        const sc = score(parsed);
+        if(!best || sc>best.sc){ best={canvas,parsed,sc,raw:text}; }
       }
-      pillOk('ocr');
+      ok('ocr');
 
-      if (!best || best.score < 1) {
-        // Still show what we got and let the user decide / re-take
-        el.hudPreview.src = candidates.length ? drawCrop(img, candidates[0].x, candidates[0].y, candidates[0].w, candidates[0].h).toDataURL('image/jpeg', 0.85) : '';
-        pillPending('parse'); pillErr('parse');
-        banner('Could not confidently read the HUD. Shown is our best crop. Please try a clearer photo.', 'warning');
+      if(!best){ err('parse'); setBanner('Could not read HUD text. Try clearer photo.', 'warning'); return; }
+
+      // Show crop
+      el.hud.src = best.canvas.toDataURL('image/jpeg', .9);
+
+      // Populate fields
+      start('parse');
+      const {date,time,lat,lon,address} = best.parsed;
+      $('#r-date').textContent = date || '—';
+      $('#r-time').textContent = time || '—';
+      $('#r-lat').textContent  = lat  || '—';
+      $('#r-lon').textContent  = lon  || '—';
+      $('#r-addr').textContent = address || '—';
+
+      const llOk = plausible(lat,CFG.LAT_RANGE) && plausible(lon,CFG.LON_RANGE);
+      if(!date || !time || !address || !llOk){
+        err('parse');
+        setBanner('Parsed partially. Verify date/time, address, latitude and longitude.', 'warning');
         return;
       }
+      ok('parse');
 
-      // Use best
-      el.hudPreview.src = best.canvas.toDataURL('image/jpeg', 0.9);
+      // Geo
+      const g = geoLookup(lat,lon);
+      $('#r-ward').textContent = g.ward || '—';
+      $('#r-beat').textContent = g.beat || '—';
+      $('#r-ps').textContent   = g.ps   || '—';
+      ok('review');
 
-      pillPending('parse');
-      const { date, time, lat, lon, address } = best.parsed;
-      setText(el.rDate, date || '—');
-      setText(el.rTime, time || '—');
-      setText(el.rLat, lat || '—');
-      setText(el.rLon, lon || '—');
-      setText(el.rAddr, address || '—');
-
-      const okNumbers = plausible(lat, CFG.LAT_RANGE) && plausible(lon, CFG.LON_RANGE);
-      if (!okNumbers) {
-        pillErr('parse');
-        banner('Parsed, but latitude/longitude look invalid for Mumbai. Please verify.', 'warning');
-        return;
-      }
-      pillOk('parse');
-
-      // Geo lookup
-      const geo = lookupGeo(lat, lon);
-      setText(el.rWard, geo.ward || '—');
-      setText(el.rBeat, geo.beat || '—');
-      setText(el.rPS, geo.ps || '—');
-
-      const allOk = date && time && address && geo.ward && geo.beat && geo.ps;
-      pillOk('review');
-
-      // Conditional redirect
-      if (CFG.REDIRECT_ON_SUCCESS && allOk) {
-        pillPending('redirect');
-        const url = CFG.FORM_URL_TEMPLATE
+      const allOK = g.ward && g.beat && g.ps;
+      if (CFG.AUTO_REDIRECT && allOK){
+        start('redirect');
+        const url = CFG.FORM
           .replace('{DATE}', encodeURIComponent(date))
           .replace('{TIME}', encodeURIComponent(time))
-          .replace('{LON}', encodeURIComponent(lon))
-          .replace('{LAT}', encodeURIComponent(lat))
-          .replace('{WARD}', encodeURIComponent(geo.ward))
-          .replace('{BEAT}', encodeURIComponent(geo.beat))
+          .replace('{LAT}',  encodeURIComponent(lat))
+          .replace('{LON}',  encodeURIComponent(lon))
+          .replace('{WARD}', encodeURIComponent(g.ward))
+          .replace('{BEAT}', encodeURIComponent(g.beat))
           .replace('{ADDR}', encodeURIComponent(address))
-          .replace('{PS}', encodeURIComponent(geo.ps));
-        pillOk('redirect');
-        window.open(url, '_blank', 'noopener');
+          .replace('{PS}',   encodeURIComponent(g.ps));
+        ok('redirect');
+        window.open(url,'_blank','noopener');
       } else {
-        pillErr('redirect');
-        if (!allOk) banner('Parsed successfully. Ward/Beat/PS or address/date/time incomplete — no redirect.', 'info');
+        err('redirect');
       }
 
-    } catch (e) {
+    }catch(e){
       console.error(e);
-      pillErr('upload'); pillErr('ocr'); pillErr('parse'); pillErr('geo'); pillErr('review'); pillErr('redirect');
-      banner('Unexpected error while processing the image.', 'error');
+      setBanner('Unexpected error while processing image.', 'error');
+      ['upload','ocr','parse','geo','review','redirect'].forEach(x=>err(x));
     }
   }
 
-  function scoreParse(p) {
-    let s = 0;
-    if (p.date) s++;
-    if (p.time) s++;
-    if (plausible(p.lat, CFG.LAT_RANGE)) s+=2;
-    if (plausible(p.lon, CFG.LON_RANGE)) s+=2;
-    if (p.address) s++;
-    return s;
+  function score(p){
+    let s=0; if(p.date)s++; if(p.time)s++; if(plausible(p.lat,CFG.LAT_RANGE))s+=2; if(plausible(p.lon,CFG.LON_RANGE))s+=2; if(p.address)s++; return s;
   }
 
-  function setText(node, txt) { if (node) node.textContent = txt; }
-
-  function resetUI() {
-    banner('', 'info'); if (el.banner) el.banner.hidden = true;
-    [el.rDate, el.rTime, el.rLat, el.rLon, el.rAddr, el.rWard, el.rBeat, el.rPS]
-      .forEach(n => n && (n.textContent = '—'));
-    if (el.hudPreview) el.hudPreview.src = '';
-    // reset pills (upload will be set to pending immediately)
-    Object.keys(pills).forEach(k => {
-      pills[k].classList.remove('pill--ok','pill--err','pill--pending');
-      const tag = pills[k].querySelector('.pill__time'); if (tag) tag.textContent = '';
-    });
+  function resetUI(){
+    setBanner('', 'info'); el.banner.hidden=true;
+    [el.original, el.hud].forEach(i=>i && (i.src=''));
+    ['r-date','r-time','r-lat','r-lon','r-addr','r-ward','r-beat','r-ps'].forEach(id=>{ const n=$('#'+id); if(n) n.textContent='—'; });
+    Object.values(pills).forEach(p=>{ p.classList.remove('pill--ok','pill--err','pill--pending'); p.querySelector('.pill__time').textContent=''; });
   }
-
-  // Expose for debugging if needed
-  window.__mcgm_debug = { parseHud, smartHudBand, buildCandidateCrops };
 
 })();
