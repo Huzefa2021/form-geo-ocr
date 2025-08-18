@@ -1,533 +1,574 @@
-/* -----------------------------
-   MCGM Marshal Upload – App JS
-   v2025.08.18.Prod
-------------------------------*/
+/* -----------------------------------------------------------
+   MCGM | Abandoned Vehicles — Marshal Upload
+   Robust client OCR pipeline (no hard failures)
+   v2025.08.18.R2
+------------------------------------------------------------*/
 
 (() => {
-  // ---------- DOM ----------
-  const els = {
-    // pills
-    pillUpload: document.getElementById('pill-upload'),
-    pillOcr: document.getElementById('pill-ocr'),
-    pillParse: document.getElementById('pill-parse'),
-    pillGeo: document.getElementById('pill-geo'),
-    pillReview: document.getElementById('pill-review'),
-    pillRedirect: document.getElementById('pill-redirect'),
+  // ---------- CONFIG ----------
+  const CFG = {
+    // Crop passes (fractions of image height)
+    FIXED_BOTTOM_RATIO: 0.26,         // default HUD band height
+    WIDE_BOTTOM_RATIO: 0.34,          // wider fallback band height
+    SMART_SEARCH_WINDOW: 0.38,        // search bottom 38% for darkest bar
+    LEFT_TRIM_RATIO: 0.18,            // try trimming left 18% to hide mini map
+    MIN_HUD_HEIGHT_PX: 160,           // minimum band height in pixels
+    MAX_OCR_SECONDS: 35,              // soft budget
+    OCR_LANG: 'eng+hin',              // robust + includes Devanagari; avoids "mar" 404
+    REDIRECT_ON_SUCCESS: true,        // flip to false if you want manual only
+    FORM_URL_TEMPLATE:
+      'https://docs.google.com/forms/d/e/1FAIpQLSeo-xlOSxvG0IwtO5MkKaTJZNJkgTsmgZUw-FBsntFlNdRnCw/viewform?usp=pp_url' +
+      '&entry.1911996449={DATE}' +        // date (YYYY-MM-DD)
+      '&entry.1421115881={TIME}' +        // time (HH:mm)
+      '&entry.113122688={LON}' +          // 1 -> long
+      '&entry.419288992={LAT}' +          // 2 -> lat
+      '&entry.1625337207={WARD}' +        // 3 -> ward
+      '&entry.1058310891={BEAT}' +        // 4 -> beat
+      '&entry.1188611077={ADDR}' +        // 5 -> address
+      '&entry.1555105834={PS}',           // 6 -> police station
 
-    // status row under header
-    bar: document.getElementById('stage-bar'),
+    // Mumbai plausibility for float-only fallback
+    LAT_RANGE: [18.0, 20.5],
+    LON_RANGE: [72.0, 73.5]
+  };
 
-    // file
-    drop: document.getElementById('dropzone'),
-    file: document.getElementById('fileInput'),
-    originalPreview: document.getElementById('originalPreview'),
-    cropPreview: document.getElementById('cropPreview'),
+  // ---------- UI ELEMENTS ----------
+  const el = {
+    file: document.getElementById('file'),
+    dropZone: document.getElementById('drop-zone'),
+    originalPreview: document.getElementById('original-preview'),
+    hudPreview: document.getElementById('hud-preview'),
 
     // results
-    rDate: document.getElementById('result-date'),
-    rTime: document.getElementById('result-time'),
-    rLat: document.getElementById('result-lat'),
-    rLon: document.getElementById('result-lon'),
-    rAddr: document.getElementById('result-address'),
-    rWard: document.getElementById('result-ward'),
-    rBeat: document.getElementById('result-beat'),
-    rPS: document.getElementById('result-ps'),
+    rDate: qs('#r-date'), rTime: qs('#r-time'),
+    rLat: qs('#r-lat'), rLon: qs('#r-lon'),
+    rAddr: qs('#r-addr'), rWard: qs('#r-ward'),
+    rBeat: qs('#r-beat'), rPS: qs('#r-ps'),
 
-    // controls
-    reset: document.getElementById('btnReset'),
-    cdnBadge: document.getElementById('cdnBadge'),
+    // pills
+    pillUpload: qs('[data-pill="upload"]'),
+    pillOCR: qs('[data-pill="ocr"]'),
+    pillParse: qs('[data-pill="parse"]'),
+    pillGeo: qs('[data-pill="geo"]'),
+    pillReview: qs('[data-pill="review"]'),
+    pillRedirect: qs('[data-pill="redirect"]'),
+
+    banner: document.getElementById('banner'), // inline message area
   };
 
-  // ---------- Config ----------
-  const OCR_LANG = 'eng+hin';          // robust + no marathi 404
-  const OCR_WORKER_PATH =
-    'https://cdn.jsdelivr.net/npm/tesseract.js@5.0.3/dist/tesseract.min.js';
+  function qs(s) { return document.querySelector(s); }
 
-  const GEO_PATHS = {
-    wards: 'wards.geojson',
-    beats: 'beats.geojson',
-    police: 'police_jurisdiction.geojson',
+  // ---------- STATUS / TIMER ----------
+  const t0 = {};
+  const pills = {
+    upload: el.pillUpload,
+    ocr: el.pillOCR,
+    parse: el.pillParse,
+    geo: el.pillGeo,
+    review: el.pillReview,
+    redirect: el.pillRedirect
   };
 
-  const GOOGLE_FORM = {
-    base:
-      'https://docs.google.com/forms/d/e/1FAIpQLSeo-xlOSxvG0IwtO5MkKaTJZNJkgTsmgZUw-FBsntFlNdRnCw/viewform?usp=pp_url',
-    keys: {
-      date: 'entry.1911996449',
-      time: 'entry.1421115881',
-      lon: 'entry.113122688',
-      lat: 'entry.419288992',
-      ward: 'entry.1625337207',
-      beat: 'entry.1058310891',
-      address: 'entry.1188611077',
-      ps: 'entry.1555105834',
-    },
-  };
+  function pillPending(name)  { setPill(name, 'pending'); t0[name] = performance.now(); }
+  function pillOk(name)       { finalizePill(name, 'ok'); }
+  function pillErr(name)      { finalizePill(name, 'err'); }
 
-  // ---------- State ----------
-  let geo = { wards: null, beats: null, police: null };
-  let result = {
-    date: null,
-    time: null,
-    lat: null,
-    lon: null,
-    address: '',
-    ward: '',
-    beat: '',
-    ps: '',
-  };
+  function finalizePill(name, state) {
+    const ms = (performance.now() - (t0[name] || performance.now())).toFixed(0);
+    const s = (ms/1000).toFixed(1) + 's';
+    setPill(name, state, s);
+  }
 
-  const t0 = {}; // stage timers
+  function setPill(name, state, timeLabel) {
+    const pill = pills[name];
+    if (!pill) return;
+    pill.classList.remove('pill--ok','pill--err','pill--pending');
+    pill.classList.add('pill--' + state);
+    const tag = pill.querySelector('.pill__time');
+    if (timeLabel && tag) tag.textContent = `(${timeLabel})`;
+  }
 
-  // ---------- Utils: Pills/Timers ----------
-  function ms(d) {
-    return `${(d ?? 0).toFixed(1)}s`;
-  }
-  function startStage(key, pill) {
-    t0[key] = performance.now();
-    setPill(pill, 'run', '');
-  }
-  function endStage(key, pill) {
-    const elapsed = (performance.now() - (t0[key] || performance.now())) / 1000;
-    setPill(pill, 'ok', `(${ms(elapsed)})`);
-    return elapsed;
-  }
-  function failStage(key, pill, msg) {
-    setPill(pill, 'err', msg ? `— ${msg}` : '');
-  }
-  function setPill(el, state, suffix = '') {
-    if (!el) return;
-    el.classList.remove('pill-ok', 'pill-warn', 'pill-err', 'pill-run', 'pill-idle');
-    switch (state) {
-      case 'ok':
-        el.classList.add('pill-ok'); break;
-      case 'warn':
-        el.classList.add('pill-warn'); break;
-      case 'err':
-        el.classList.add('pill-err'); break;
-      case 'run':
-        el.classList.add('pill-run'); break;
-      default:
-        el.classList.add('pill-idle');
+  function banner(msg, kind='info') {
+    if (!el.banner) return;
+    el.banner.textContent = msg;
+    el.banner.className = `banner banner--${kind}`;
+    el.banner.hidden = false;
+    // auto hide informational banners
+    if (kind === 'info') {
+      clearTimeout(banner._to);
+      banner._to = setTimeout(() => { el.banner.hidden = true; }, 3500);
     }
-    const base = el.dataset.label || el.textContent.split('(')[0].trim();
-    el.dataset.label = base;
-    el.textContent = `${base} ${suffix}`.trim();
   }
 
-  // ---------- File UX (single, no double prompt) ----------
-  function bindFileUX() {
-    // click to open
-    els.drop.addEventListener('click', () => els.file.click(), { passive: true });
-
-    // prevent default drag behaviors
-    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach((evt) => {
-      els.drop.addEventListener(evt, (e) => {
-        e.preventDefault(); e.stopPropagation();
-      });
-      document.body.addEventListener(evt, (e) => {
-        if (evt !== 'drop') { e.preventDefault(); e.stopPropagation(); }
-      });
+  // ---------- UTIL: IMAGE LOADING ----------
+  function readFileAsDataURL(file) {
+    return new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(fr.result);
+      fr.onerror = rej;
+      fr.readAsDataURL(file);
     });
-
-    els.drop.addEventListener('dragover', () => els.drop.classList.add('hover'));
-    els.drop.addEventListener('dragleave', () => els.drop.classList.remove('hover'));
-    els.drop.addEventListener('drop', (e) => {
-      els.drop.classList.remove('hover');
-      const f = e.dataTransfer?.files?.[0];
-      if (f) handleFile(f);
-    });
-
-    els.file.addEventListener('change', () => {
-      const f = els.file.files?.[0];
-      if (f) handleFile(f);
-      // clear value so selecting same file again still triggers change
-      els.file.value = '';
-    });
-
-    els.reset.addEventListener('click', hardReset);
   }
 
-  function hardReset() {
-    result = { date: null, time: null, lat: null, lon: null, address: '', ward: '', beat: '', ps: '' };
-    // clear fields
-    setText(els.rDate, '—'); setText(els.rTime, '—');
-    setText(els.rLat, '—');  setText(els.rLon, '—');
-    setText(els.rAddr, '—'); setText(els.rWard, '—');
-    setText(els.rBeat, '—'); setText(els.rPS, '—');
-    els.originalPreview.src = '';
-    els.cropPreview.src = '';
-
-    // reset pills
-    ['pillUpload','pillOcr','pillParse','pillGeo','pillReview','pillRedirect'].forEach(id=>{
-      const el = els[id]; if (el) setPill(el,'idle','');
-    });
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-
-  // ---------- Helpers ----------
-  function setText(el, v) { if (el) el.textContent = v ?? '—'; }
-
-  function loadImageToPreview(file) {
-    return new Promise((resolve, reject) => {
-      const url = URL.createObjectURL(file);
+  function loadImage(src) {
+    return new Promise((res, rej) => {
       const img = new Image();
-      img.onload = () => {
-        els.originalPreview.src = url; // 25% via CSS container
-        resolve({ img, url });
-      };
-      img.onerror = reject;
-      img.src = url;
+      img.onload = () => res(img);
+      img.onerror = rej;
+      img.src = src;
     });
   }
 
-  // Crop: bottom HUD with multiple left trims; returns dataURL candidates
-  function makeHudCrops(img) {
-    const H = img.naturalHeight || img.height;
-    const W = img.naturalWidth || img.width;
-
-    // bottom band heights to try
-    const heights = [0.42, 0.36, 0.48]; // fraction from bottom
-    const leftTrims = [0.00, 0.08, 0.12, 0.18, 0.24];
-
-    const candidates = [];
-    heights.forEach((hFrac) => {
-      const y = Math.max(0, Math.floor(H * (1 - hFrac)));
-      const h = Math.floor(H * hFrac);
-      leftTrims.forEach((lFrac) => {
-        const x = Math.floor(W * lFrac);
-        const w = Math.max(64, W - x); // ensure non-empty
-        const c = document.createElement('canvas');
-        c.width = w; c.height = h;
-        const ctx = c.getContext('2d');
-        ctx.drawImage(img, x, y, w, h, 0, 0, w, h);
-        candidates.push(c.toDataURL('image/jpeg', 0.92));
-      });
-    });
-    return candidates;
+  function drawCrop(img, x, y, w, h) {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const g = c.getContext('2d');
+    g.drawImage(img, x, y, w, h, 0, 0, w, h);
+    return c;
   }
 
-  // ---------- OCR ----------
-  async function ensureTesseract() {
-    if (window.Tesseract) return;
-    await new Promise((res, rej) => {
-      const s = document.createElement('script');
-      s.src = OCR_WORKER_PATH;
-      s.onload = res; s.onerror = rej;
-      document.head.appendChild(s);
-    });
-  }
+  // Smart HUD finder (largest dark band near bottom)
+  function smartHudBand(img) {
+    const H = img.height, W = img.width;
+    const g = drawCrop(img, 0, 0, W, H).getContext('2d');
+    const data = g.getImageData(0, 0, W, H).data;
 
-  async function ocrDataURL(dataUrl, lang = OCR_LANG) {
-    await ensureTesseract();
-    const { Tesseract } = window;
-    const worker = await Tesseract.createWorker(lang);
-    const { data } = await worker.recognize(dataUrl);
-    await worker.terminate();
-    return data.text || '';
-  }
+    const startY = Math.floor(H * (1 - CFG.SMART_SEARCH_WINDOW));
+    const bandHeights = [
+      Math.max(Math.floor(H * CFG.FIXED_BOTTOM_RATIO), CFG.MIN_HUD_HEIGHT_PX),
+      Math.max(Math.floor(H * CFG.WIDE_BOTTOM_RATIO), CFG.MIN_HUD_HEIGHT_PX)
+    ];
 
-  // ---------- Parser (from previous message, integrated) ----------
-  function normalizeOcr(raw) {
-    let t = raw || '';
-    t = t.replace(/\r/g, '').replace(/\t/g, ' ').replace(/[ ]{2,}/g, ' ');
-    t = t.replace(/[º°•◦]/g, '°');
-    t = t
-      .replace(/\bO(?=\d)/g, '0')
-      .replace(/(?<=\d)O\b/g, '0')
-      .replace(/\bI(?=\d)/g, '1')
-      .replace(/\bl(?=\d)/g, '1')
-      .replace(/S(?=\d)/g, '5');
+    let best = null;
 
-    t = t
-      .replace(/GPS Map Camera/gi, '')
-      .replace(/\bGoogle\b/gi, '')
-      .replace(/\bAM\b|\bPM\b/gi, (m) => m.toUpperCase());
-
-    return t
-      .split('\n')
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .join('\n');
-  }
-  function coerceNumber(n) {
-    if (n == null || n === '') return null;
-    const x = Number(String(n).replace(/[^\d.\-+eE]/g, ''));
-    return Number.isFinite(x) ? x : null;
-  }
-  function plausibleLatLon(lat, lon) {
-    if (lat == null || lon == null) return false;
-    return lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
-  }
-  function fallbackLatLonSearch(text) {
-    const re = /(-?\d{1,2}\.\d{4,8}).{0,25}?(-?\d{2,3}\.\d{4,8})/is;
-    const m = text.match(re);
-    if (m) {
-      let lat = coerceNumber(m[1]);
-      let lon = coerceNumber(m[2]);
-      if (!plausibleLatLon(lat, lon) && plausibleLatLon(lon, lat)) [lat, lon] = [lon, lat];
-      if (plausibleLatLon(lat, lon)) return { lat, lon };
+    for (const bh of bandHeights) {
+      const windowH = Math.min(bh, H - startY);
+      // slide from bottom upwards inside the search region
+      const steps = 14;
+      for (let i=0; i<=steps; i++) {
+        const yTop = H - windowH - Math.floor((i/steps) * (H - startY - windowH));
+        // score darkness & uniformity
+        const score = scoreBandDarkness(data, W, H, yTop, windowH);
+        if (!best || score > best.score) {
+          best = { y: yTop, h: windowH, score };
+        }
+      }
     }
-    return { lat: null, lon: null };
-  }
-  function extractLatLonFromLine(line) {
-    const labeled = line.match(
-      /(?:la[tf]\s*[:\- ]*\s*)(-?\d{1,2}\.\d{4,8}).*?(?:lo?(?:ng|n|g)\s*[:\- ]*)(-?\d{2,3}\.\d{4,8})/i
-    );
-    if (labeled) {
-      return { lat: coerceNumber(labeled[1]), lon: coerceNumber(labeled[2]) };
-    }
-    const anyTwo = line.match(/(-?\d{1,2}\.\d{4,8}).*?(-?\d{2,3}\.\d{4,8})/);
-    if (anyTwo) {
-      let lat = coerceNumber(anyTwo[1]);
-      let lon = coerceNumber(anyTwo[2]);
-      if (!plausibleLatLon(lat, lon) && plausibleLatLon(lon, lat)) [lat, lon] = [lon, lat];
-      if (plausibleLatLon(lat, lon)) return { lat, lon };
-    }
-    return { lat: null, lon: null };
-  }
-  function extractDateTimeFromLine(line) {
-    let date = null, time = null;
-    const dmy = line.match(/\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})\b/);
-    const ymd = line.match(/\b(20\d{2})-(\d{1,2})-(\d{1,2})\b/);
-    if (dmy) {
-      const [_, d, m, y] = dmy; const yyyy = y.length === 2 ? `20${y}` : y;
-      date = `${yyyy}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-    } else if (ymd) {
-      const [_, y, m, d] = ymd; date = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-    }
-    const tm = line.match(/\b(\d{1,2}):(\d{2})\b(?:\s*(AM|PM))?/i);
-    if (tm) {
-      let [__, hh, mm, ap] = tm; let H = parseInt(hh, 10);
-      if (ap) { ap = ap.toUpperCase(); if (ap === 'PM' && H < 12) H += 12; if (ap === 'AM' && H === 12) H = 0; }
-      time = `${String(H).padStart(2, '0')}:${mm}`;
-    }
-    return { date, time };
-  }
-  function parseOcrText(rawText) {
-    const text = normalizeOcr(rawText);
-    const lines = text.split('\n').map((s) => s.trim()).filter(Boolean);
-    if (lines.length === 0) return { date: null, time: null, lat: null, lon: null, address: '' };
-
-    // date/time from last relevant line
-    let dtIdx = -1;
-    for (let i = lines.length - 1; i >= 0; i--) {
-      if (/\b(20\d{2}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\b/.test(lines[i])) { dtIdx = i; break; }
-    }
-    let date = null, time = null;
-    if (dtIdx !== -1) ({ date, time } = extractDateTimeFromLine(lines[dtIdx]));
-
-    // lat/lon from second-last area
-    let llIdx = -1;
-    for (let i = (dtIdx !== -1 ? dtIdx - 1 : lines.length - 1); i >= 0; i--) {
-      if (/(?:la[tf]|lo(?:ng|n|g)|lng)/i.test(lines[i]) || /\d{1,2}\.\d{4,8}/.test(lines[i])) { llIdx = i; break; }
-    }
-    let { lat, lon } = { lat: null, lon: null };
-    if (llIdx !== -1) ({ lat, lon } = extractLatLonFromLine(lines[llIdx]));
-    if (!plausibleLatLon(lat, lon)) ({ lat, lon } = fallbackLatLonSearch(text));
-
-    // Address: ignore first line; use line 2 (+3) up to llIdx/dtIdx
-    let stopAt = Math.min(llIdx !== -1 ? llIdx : lines.length, dtIdx !== -1 ? dtIdx : lines.length);
-    let addrStart = 1; if (addrStart >= stopAt) addrStart = 0;
-    let addrCandidates = lines.slice(addrStart, stopAt);
-    let address = addrCandidates
-      .filter((s) => s && s.length > 3)
-      .map((s) => s.replace(/\s{2,}/g, ' ').replace(/[,;]\s*$/g, ''))
-      .join(', ');
-    if (!address && lines[1]) address = lines[1];
-    address = address.replace(/\s+,/g, ',').replace(/,\s*,/g, ', ').replace(/\s{2,}/g, ' ').trim();
-
-    return { date, time, lat, lon, address };
+    return best; // {y,h,score}
   }
 
-  // ---------- GeoJSON + PIP ----------
-  async function loadGeo() {
-    const [wards, beats, police] = await Promise.all([
-      fetch(GEO_PATHS.wards).then(r => r.ok ? r.json() : null),
-      fetch(GEO_PATHS.beats).then(r => r.ok ? r.json() : null),
-      fetch(GEO_PATHS.police).then(r => r.ok ? r.json() : null),
-    ]);
-    geo = { wards, beats, police };
+  function scoreBandDarkness(pix, W, H, yTop, bh) {
+    let dark = 0, total = 0, edges = 0;
+    const yEnd = yTop + bh;
+    for (let y = yTop; y < yEnd; y+=2) {
+      const row = y * W * 4;
+      for (let x = 0; x < W; x+=2) {
+        const i = row + x*4;
+        const r = pix[i], g = pix[i+1], b = pix[i+2];
+        // luminance
+        const Y = 0.2126*r + 0.7152*g + 0.0722*b;
+        if (Y < 70) dark++;
+        total++;
+      }
+    }
+    // density of dark pixels
+    const density = dark / Math.max(1,total);
+    // prefer wider bars with more darkness
+    return density;
   }
 
-  function getProp(props, keys) {
-    if (!props) return '';
-    for (const k of keys) {
-      if (props[k] != null && props[k] !== '') return props[k];
-    }
-    return '';
+  function fixedBottomBand(img, ratio) {
+    const H = img.height, W = img.width;
+    const bh = Math.max(Math.floor(H * ratio), CFG.MIN_HUD_HEIGHT_PX);
+    return { y: H - bh, h: bh };
   }
 
-  function pointInPolygon([x, y], poly) {
-    // Ray casting for one ring
-    let inside = false;
-    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-      const xi = poly[i][0], yi = poly[i][1];
-      const xj = poly[j][0], yj = poly[j][1];
-      const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi + 0.0) + xi);
-      if (intersect) inside = !inside;
-    }
-    return inside;
-  }
+  // Try several crops and return them (full + left-trimmed)
+  function buildCandidateCrops(img) {
+    const W = img.width, H = img.height;
+    const crops = [];
+    // 1) Smart band
+    const smart = smartHudBand(img);
+    if (smart) crops.push({x:0, y:smart.y, w:W, h:smart.h, reason:'smart'});
 
-  function featureContainsPoint(feature, lon, lat) {
-    const g = feature.geometry;
-    if (!g) return false;
-    if (g.type === 'Polygon') {
-      return g.coordinates.some(ring => pointInPolygon([lon, lat], ring));
-    }
-    if (g.type === 'MultiPolygon') {
-      return g.coordinates.some(poly => poly.some(ring => pointInPolygon([lon, lat], ring)));
-    }
-    return false;
-  }
+    // 2) Fixed bottom
+    const fixed = fixedBottomBand(img, CFG.FIXED_BOTTOM_RATIO);
+    crops.push({x:0, y:fixed.y, w:W, h:fixed.h, reason:'fixed'});
 
-  function lookupGeo(lon, lat) {
-    const out = { ward: '', beat: '', ps: '' };
-    if (!plausibleLatLon(lat, lon)) return out;
+    // 3) Wide fallback
+    const wide = fixedBottomBand(img, CFG.WIDE_BOTTOM_RATIO);
+    crops.push({x:0, y:wide.y, w:W, h:wide.h, reason:'wide'});
 
-    if (geo.wards?.features) {
-      const f = geo.wards.features.find(ft => featureContainsPoint(ft, lon, lat));
-      if (f) out.ward = getProp(f.properties, ['WARD','WARD_NO','Ward','ward','WARDNAME','WARD_NAME']);
-    }
-    if (geo.beats?.features) {
-      const f = geo.beats.features.find(ft => featureContainsPoint(ft, lon, lat));
-      if (f) out.beat = getProp(f.properties, ['BEAT','BEAT_NO','Beat','beat','BEATNO']);
-    }
-    if (geo.police?.features) {
-      const f = geo.police.features.find(ft => featureContainsPoint(ft, lon, lat));
-      if (f) out.ps = getProp(f.properties, ['PS','PS_NAME','Police_St','POLICE_ST','STATION','Name']);
+    // Produce left-trim variants for each
+    const out = [];
+    for (const c of crops) {
+      const c1 = {...c, leftTrim: 0};
+      const c2 = {...c, leftTrim: Math.floor(W * CFG.LEFT_TRIM_RATIO)};
+      out.push(c1, c2);
     }
     return out;
   }
 
-  // ---------- Redirect ----------
-  function canRedirect(r) {
-    return Boolean(
-      r.date && r.time &&
-      plausibleLatLon(r.lat, r.lon) &&
-      r.address && r.ward && r.beat && r.ps
-    );
+  // ---------- OCR ----------
+  let workerPromise = null;
+  function getWorker() {
+    if (workerPromise) return workerPromise;
+    pillOCR && pillPending('ocr');
+    workerPromise = Tesseract.createWorker({
+      logger: m => { /* could stream progress to UI if needed */ }
+    }).then(async w => {
+      await w.loadLanguage(CFG.OCR_LANG);
+      await w.initialize(CFG.OCR_LANG);
+      pillOk('ocr');
+      return w;
+    }).catch(e => {
+      pillErr('ocr');
+      banner('OCR engine failed to initialize. Check network / CDN.', 'error');
+      throw e;
+    });
+    return workerPromise;
   }
 
-  function redirectToGoogleForm(r) {
-    const q = new URLSearchParams();
-    q.set(GOOGLE_FORM.keys.date, r.date);
-    q.set(GOOGLE_FORM.keys.time, r.time);
-    q.set(GOOGLE_FORM.keys.lon, String(r.lon));
-    q.set(GOOGLE_FORM.keys.lat, String(r.lat));
-    q.set(GOOGLE_FORM.keys.ward, r.ward);
-    q.set(GOOGLE_FORM.keys.beat, r.beat);
-    q.set(GOOGLE_FORM.keys.address, r.address);
-    q.set(GOOGLE_FORM.keys.ps, r.ps);
-
-    const url = `${GOOGLE_FORM.base}&${q.toString()}`;
-    window.open(url, '_blank', 'noopener,noreferrer');
+  async function runOCR(canvas) {
+    const w = await getWorker();
+    const { data: { text } } = await w.recognize(canvas);
+    return text || '';
   }
 
-  // ---------- Pipeline ----------
-  async function handleFile(file) {
-    try {
-      hardReset();
-      startStage('upload', els.pillUpload);
+  // ---------- PARSE ----------
+  function normalize(text) {
+    return text
+      .replace(/\u00B0/g, '°')
+      .replace(/[|]+/g, 'I')
+      .replace(/[“”]/g, '"')
+      .replace(/[’‘]/g, "'")
+      .replace(/[—–]/g, '-')
+      .replace(/\u00A0/g, ' ')
+      .replace(/\s+$/gm, '')
+      .trim();
+  }
 
-      // show original
-      const { img } = await loadImageToPreview(file);
-      const up = endStage('upload', els.pillUpload);
+  function plausible(v, [lo, hi]) {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= lo && n <= hi;
+  }
 
-      // crops
-      const candidates = makeHudCrops(img);
-      // make first crop visible while we OCR
-      els.cropPreview.src = candidates[0];
+  function parseHud(text) {
+    const out = {
+      date: '', time: '', lat: '', lon: '', address: ''
+    };
+    const lines = normalize(text).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
 
-      // OCR tries
-      startStage('ocr', els.pillOcr);
-      let ocrText = '';
-      for (let i = 0; i < candidates.length; i++) {
-        try {
-          const txt = await ocrDataURL(candidates[i], OCR_LANG);
-          const parsed = parseOcrText(txt);
-          // choose this crop if it produced a plausible lat/lon OR clearly has “Lat/Long/India”
-          if (plausibleLatLon(parsed.lat, parsed.lon) || /lat|long|india/i.test(txt)) {
-            ocrText = txt;
-            els.cropPreview.src = candidates[i]; // keep that crop
-            break;
-          }
-          // Otherwise keep searching; still remember last OCR result as fallback
-          if (!ocrText) ocrText = txt;
-        } catch {
-          // continue next candidate
+    if (!lines.length) return out;
+
+    // Strip first line (city/country banner)
+    let idx = 1;
+
+    // Collect address lines until we see Lat/Long or time/date
+    const addrParts = [];
+    while (idx < lines.length) {
+      const L = lines[idx];
+      if (/^lat/i.test(L) || /^long/i.test(L) || /GMT/i.test(L) || /\d{1,2}\s*:\s*\d{2}/i.test(L)) break;
+      addrParts.push(L);
+      idx++;
+      if (addrParts.length >= 2) break; // usually at most two lines
+    }
+
+    // Seek lat/lon anywhere in remaining lines
+    const rest = lines.slice(idx).join(' • ');
+
+    // Patterns
+    const rLat = /lat(?:itude)?[:\s]*([+-]?\d{1,2}\.\d{3,7})/i;
+    const rLon = /lon(?:g(?:itude)?)?[:\s]*([+-]?\d{1,3}\.\d{3,7})/i;
+
+    let lat = (rest.match(rLat) || [])[1] || '';
+    let lon = (rest.match(rLon) || [])[1] || '';
+
+    // Fallback: find any floats and map by Mumbai ranges
+    if (!lat || !lon) {
+      const floats = rest.match(/[-+]?\d{1,3}\.\d{3,7}/g) || [];
+      // try pairwise
+      for (let i=0; i<floats.length; i++) {
+        for (let j=i+1; j<floats.length; j++) {
+          const a = +floats[i], b = +floats[j];
+          const c1 = plausible(a, CFG.LAT_RANGE) && plausible(b, CFG.LON_RANGE);
+          const c2 = plausible(b, CFG.LAT_RANGE) && plausible(a, CFG.LON_RANGE);
+          if (c1) { lat = floats[i]; lon = floats[j]; break; }
+          if (c2) { lat = floats[j]; lon = floats[i]; break; }
         }
+        if (lat && lon) break;
       }
-      if (!ocrText) throw new Error('OCR returned empty text');
+    }
 
-      endStage('ocr', els.pillOcr);
+    // Time & Date (last line normally)
+    const dateTime = lines[lines.length - 1];
+    let time = '', date = '';
+    // e.g., 18/08/2025 11:52 AM GMT +05:30
+    const mdt = dateTime.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\s+(\d{1,2}:\d{2}\s*[AP]M)/i);
+    if (mdt) {
+      date = mdt[1];
+      time = mdt[2];
+    } else {
+      // try anywhere
+      const any = rest.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}).*?(\d{1,2}:\d{2}\s*[AP]M)/i);
+      if (any) { date = any[1]; time = any[2]; }
+    }
 
-      // Parse
-      startStage('parse', els.pillParse);
-      const parsed = parseOcrText(ocrText);
+    out.address = addrParts.join(', ');
+    out.lat = lat || '';
+    out.lon = lon || '';
+    out.date = toIsoDate(date);
+    out.time = toIsoTime(time);
+    return out;
+  }
 
-      result.date = parsed.date;
-      result.time = parsed.time;
-      result.lat = parsed.lat;
-      result.lon = parsed.lon;
-      result.address = parsed.address;
+  function toIsoDate(d) {
+    // input: dd/mm/yyyy or dd-mm-yyyy
+    if (!d) return '';
+    const m = d.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+    if (!m) return '';
+    const [ , dd, mm, yy ] = m;
+    const yyyy = (+yy < 100) ? ('20' + yy) : yy;
+    return `${yyyy.padStart(4,'0')}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+  }
+  function toIsoTime(t) {
+    if (!t) return '';
+    // 11:52 AM -> 11:52, 03:05 PM -> 15:05
+    const m = t.match(/(\d{1,2}):(\d{2})\s*([AP]M)/i);
+    if (!m) return '';
+    let hh = +m[1], mm = m[2], ap = m[3].toUpperCase();
+    if (ap === 'PM' && hh < 12) hh += 12;
+    if (ap === 'AM' && hh === 12) hh = 0;
+    return `${String(hh).padStart(2,'0')}:${mm}`;
+  }
 
-      // UI
-      setText(els.rDate, result.date || '—');
-      setText(els.rTime, result.time || '—');
-      setText(els.rLat, result.lat != null ? result.lat.toFixed(6) : '—');
-      setText(els.rLon, result.lon != null ? result.lon.toFixed(6) : '—');
-      setText(els.rAddr, result.address || '—');
+  // ---------- GEO LOOKUP ----------
+  let wardsGeo = null, beatsGeo = null, psGeo = null;
 
-      const parseOK = Boolean(result.date && result.time && plausibleLatLon(result.lat, result.lon) && result.address);
-      setPill(els.pillParse, parseOK ? 'ok' : 'warn', parseOK ? '' : ' (partial)');
-      endStage('parse', els.pillParse);
-
-      // GeoJSON lookup
-      startStage('geo', els.pillGeo);
-      if (!geo.wards && !geo.beats && !geo.police) await loadGeo();
-      const g = lookupGeo(result.lon, result.lat);
-      result.ward = g.ward || '';
-      result.beat = g.beat || '';
-      result.ps = g.ps || '';
-      setText(els.rWard, result.ward || '—');
-      setText(els.rBeat, result.beat || '—');
-      setText(els.rPS, result.ps || '—');
-      endStage('geo', els.pillGeo);
-
-      // Review & Redirect gating
-      startStage('review', els.pillReview);
-      const okForRedirect = canRedirect(result);
-      setPill(els.pillReview, okForRedirect ? 'ok' : 'warn', okForRedirect ? '' : ' (incomplete)');
-      endStage('review', els.pillReview);
-
-      if (okForRedirect) {
-        setPill(els.pillRedirect, 'ok', '');
-        redirectToGoogleForm(result);
-      } else {
-        setPill(els.pillRedirect, 'warn', ' (blocked)');
-      }
-    } catch (err) {
-      console.error(err);
-      failStage('upload', els.pillUpload, '');
-      failStage('ocr', els.pillOcr, '');
-      failStage('parse', els.pillParse, '');
-      failStage('geo', els.pillGeo, '');
-      failStage('review', els.pillReview, '');
-      failStage('redirect', els.pillRedirect, '');
-      alert('Sorry — failed to process this image. Try another one or retake with the GPS HUD clearly visible.');
+  async function loadGeoOnce() {
+    if (wardsGeo && beatsGeo && psGeo) return;
+    pillPending('geo');
+    try {
+      const [w,b,p] = await Promise.all([
+        fetch('wards.geojson').then(r=>r.json()),
+        fetch('beats.geojson').then(r=>r.json()),
+        fetch('police_jurisdiction.geojson').then(r=>r.json())
+      ]);
+      wardsGeo = w; beatsGeo = b; psGeo = p;
+      pillOk('geo');
+    } catch (e) {
+      pillErr('geo'); banner('Failed to load GeoJSON lookups.', 'error');
     }
   }
 
-  // ---------- Boot ----------
-  function boot() {
-    bindFileUX();
-    // initial pill labels cache
-    [els.pillUpload, els.pillOcr, els.pillParse, els.pillGeo, els.pillReview, els.pillRedirect]
-      .forEach((p) => p && setPill(p, 'idle', ''));
-    if (els.cdnBadge) els.cdnBadge.textContent = 'CDN: v5 (jsDelivr)';
+  function pointIn(poly, x, y) {
+    // ray-casting
+    let inside = false;
+    for (const ring of poly) {
+      const coords = ring; // [ [lon,lat], ... ]
+      for (let i=0, j=coords.length-1; i<coords.length; j=i++) {
+        const xi = coords[i][0], yi = coords[i][1];
+        const xj = coords[j][0], yj = coords[j][1];
+        const intersect = ((yi > y) !== (yj > y)) &&
+                          (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+      }
+    }
+    return inside;
   }
 
-  boot();
+  function lookupGeo(lat, lon) {
+    if (!wardsGeo || !beatsGeo || !psGeo) return {};
+    const out = {ward:'', beat:'', ps:''};
+
+    const LON = +lon, LAT = +lat;
+    if (!Number.isFinite(LON) || !Number.isFinite(LAT)) return out;
+
+    // Wards
+    for (const f of wardsGeo.features || []) {
+      const g = f.geometry;
+      if (!g) continue;
+      if (g.type === 'Polygon') {
+        if (pointIn(g.coordinates, LON, LAT)) { out.ward = f.properties?.WARD || f.properties?.name || ''; break; }
+      } else if (g.type === 'MultiPolygon') {
+        for (const poly of g.coordinates) {
+          if (pointIn(poly, LON, LAT)) { out.ward = f.properties?.WARD || f.properties?.name || ''; break; }
+        }
+        if (out.ward) break;
+      }
+    }
+    // Beats
+    for (const f of beatsGeo.features || []) {
+      const g = f.geometry; if (!g) continue;
+      if (g.type === 'Polygon') {
+        if (pointIn(g.coordinates, LON, LAT)) { out.beat = f.properties?.BEAT || f.properties?.name || ''; break; }
+      } else if (g.type === 'MultiPolygon') {
+        for (const poly of g.coordinates) {
+          if (pointIn(poly, LON, LAT)) { out.beat = f.properties?.BEAT || f.properties?.name || ''; break; }
+        }
+        if (out.beat) break;
+      }
+    }
+    // Police
+    for (const f of psGeo.features || []) {
+      const g = f.geometry; if (!g) continue;
+      if (g.type === 'Polygon') {
+        if (pointIn(g.coordinates, LON, LAT)) { out.ps = f.properties?.PS || f.properties?.name || ''; break; }
+      } else if (g.type === 'MultiPolygon') {
+        for (const poly of g.coordinates) {
+          if (pointIn(poly, LON, LAT)) { out.ps = f.properties?.PS || f.properties?.name || ''; break; }
+        }
+        if (out.ps) break;
+      }
+    }
+    return out;
+  }
+
+  // ---------- MAIN FLOW ----------
+  attachDnD(el.dropZone);
+  el.file.addEventListener('change', onPicked);
+
+  function attachDnD(zone) {
+    ;['dragenter','dragover'].forEach(ev =>
+      zone.addEventListener(ev, e => { e.preventDefault(); zone.classList.add('dz--over'); })
+    );
+    ;['dragleave','drop'].forEach(ev =>
+      zone.addEventListener(ev, e => { e.preventDefault(); zone.classList.remove('dz--over'); })
+    );
+    zone.addEventListener('drop', async e => {
+      const file = e.dataTransfer.files && e.dataTransfer.files[0];
+      if (file) await processFile(file);
+    });
+    zone.addEventListener('click', () => el.file.click());
+  }
+
+  async function onPicked(e) {
+    const file = e.target.files && e.target.files[0];
+    if (file) await processFile(file);
+  }
+
+  async function processFile(file) {
+    resetUI();
+    pillPending('upload');
+
+    try {
+      if (!/^image\/(jpe?g|png)$/i.test(file.type)) {
+        pillErr('upload'); banner('Please upload a JPG or PNG.', 'error'); return;
+      }
+      const url = await readFileAsDataURL(file);
+      const img = await loadImage(url);
+      el.originalPreview.src = url;
+      pillOk('upload');
+
+      // Build candidates and attempt OCR on each until we get a good parse
+      await loadGeoOnce();
+      const candidates = buildCandidateCrops(img);
+
+      let best = null;
+
+      pillPending('ocr');
+      for (const c of candidates) {
+        const x = Math.max(0, c.x + (c.leftTrim || 0));
+        const w = c.w - (c.leftTrim || 0);
+        const canvas = drawCrop(img, x, c.y, w, c.h);
+        // Light enhancement (no heavy preprocessing to keep fidelity)
+        const txt = await runOCR(canvas);
+        const parsed = parseHud(txt);
+        const score = scoreParse(parsed);
+
+        if (!best || score > best.score) {
+          best = { canvas, parsed, score, reason: c.reason, leftTrim: c.leftTrim || 0, raw: txt };
+        }
+      }
+      pillOk('ocr');
+
+      if (!best || best.score < 1) {
+        // Still show what we got and let the user decide / re-take
+        el.hudPreview.src = candidates.length ? drawCrop(img, candidates[0].x, candidates[0].y, candidates[0].w, candidates[0].h).toDataURL('image/jpeg', 0.85) : '';
+        pillPending('parse'); pillErr('parse');
+        banner('Could not confidently read the HUD. Shown is our best crop. Please try a clearer photo.', 'warning');
+        return;
+      }
+
+      // Use best
+      el.hudPreview.src = best.canvas.toDataURL('image/jpeg', 0.9);
+
+      pillPending('parse');
+      const { date, time, lat, lon, address } = best.parsed;
+      setText(el.rDate, date || '—');
+      setText(el.rTime, time || '—');
+      setText(el.rLat, lat || '—');
+      setText(el.rLon, lon || '—');
+      setText(el.rAddr, address || '—');
+
+      const okNumbers = plausible(lat, CFG.LAT_RANGE) && plausible(lon, CFG.LON_RANGE);
+      if (!okNumbers) {
+        pillErr('parse');
+        banner('Parsed, but latitude/longitude look invalid for Mumbai. Please verify.', 'warning');
+        return;
+      }
+      pillOk('parse');
+
+      // Geo lookup
+      const geo = lookupGeo(lat, lon);
+      setText(el.rWard, geo.ward || '—');
+      setText(el.rBeat, geo.beat || '—');
+      setText(el.rPS, geo.ps || '—');
+
+      const allOk = date && time && address && geo.ward && geo.beat && geo.ps;
+      pillOk('review');
+
+      // Conditional redirect
+      if (CFG.REDIRECT_ON_SUCCESS && allOk) {
+        pillPending('redirect');
+        const url = CFG.FORM_URL_TEMPLATE
+          .replace('{DATE}', encodeURIComponent(date))
+          .replace('{TIME}', encodeURIComponent(time))
+          .replace('{LON}', encodeURIComponent(lon))
+          .replace('{LAT}', encodeURIComponent(lat))
+          .replace('{WARD}', encodeURIComponent(geo.ward))
+          .replace('{BEAT}', encodeURIComponent(geo.beat))
+          .replace('{ADDR}', encodeURIComponent(address))
+          .replace('{PS}', encodeURIComponent(geo.ps));
+        pillOk('redirect');
+        window.open(url, '_blank', 'noopener');
+      } else {
+        pillErr('redirect');
+        if (!allOk) banner('Parsed successfully. Ward/Beat/PS or address/date/time incomplete — no redirect.', 'info');
+      }
+
+    } catch (e) {
+      console.error(e);
+      pillErr('upload'); pillErr('ocr'); pillErr('parse'); pillErr('geo'); pillErr('review'); pillErr('redirect');
+      banner('Unexpected error while processing the image.', 'error');
+    }
+  }
+
+  function scoreParse(p) {
+    let s = 0;
+    if (p.date) s++;
+    if (p.time) s++;
+    if (plausible(p.lat, CFG.LAT_RANGE)) s+=2;
+    if (plausible(p.lon, CFG.LON_RANGE)) s+=2;
+    if (p.address) s++;
+    return s;
+  }
+
+  function setText(node, txt) { if (node) node.textContent = txt; }
+
+  function resetUI() {
+    banner('', 'info'); if (el.banner) el.banner.hidden = true;
+    [el.rDate, el.rTime, el.rLat, el.rLon, el.rAddr, el.rWard, el.rBeat, el.rPS]
+      .forEach(n => n && (n.textContent = '—'));
+    if (el.hudPreview) el.hudPreview.src = '';
+    // reset pills (upload will be set to pending immediately)
+    Object.keys(pills).forEach(k => {
+      pills[k].classList.remove('pill--ok','pill--err','pill--pending');
+      const tag = pills[k].querySelector('.pill__time'); if (tag) tag.textContent = '';
+    });
+  }
+
+  // Expose for debugging if needed
+  window.__mcgm_debug = { parseHud, smartHudBand, buildCandidateCrops };
+
 })();
