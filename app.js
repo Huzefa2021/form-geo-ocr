@@ -1,17 +1,34 @@
 /* ==========================================================
    Abandoned Vehicles – Marshal Upload (MCGM)
-   - drag & drop + single picker
-   - OCR (eng, auto-switch hin)
-   - crop bottom HUD (left-trim to skip map tile)
-   - parsing rules: ignore line1, use line2/3 for address,
+   Simplified Flow (2025-08-18)
+   - Drag & drop + single picker
+   - Crop bottom HUD (left/right trim)
+   - OCR (eng/hin/mar)
+   - Parsing rules: ignore line1, use line2–4 for address,
      second-last = lat/long, last = date/time
-   - GeoJSON from /data with fallback + schema mapping
-   - redirect to Google Form only if all fields OK
+   - GeoJSON lookup from /data
+   - Auto redirect if all good, else enable retry button
    ========================================================== */
 
 const el = (id) => document.getElementById(id);
 
-// -------------------- UI helpers --------------------
+// -------------------- UI Elements --------------------
+const fileInput   = el('fileInput');
+const dropArea    = el('dropArea');
+const imgOriginal = el('imgOriginal');
+const imgCrop     = el('imgCrop');
+
+// Result display fields
+const outDate  = el('resDate');
+const outTime  = el('resTime');
+const outLat   = el('resLat');
+const outLon   = el('resLon');
+const outAddr  = el('resAddr');
+const outWard  = el('resWard');
+const outBeat  = el('resBeat');
+const outPS    = el('resPS');
+
+// Pills (status indicators for each step)
 const pills = {
   upload: el('pill-upload'),
   ocr: el('pill-ocr'),
@@ -20,164 +37,159 @@ const pills = {
   review: el('pill-review'),
   redirect: el('pill-redirect'),
 };
-const t0 = { upload:0, ocr:0, parse:0, geo:0, review:0, redirect:0 };
 
-function setPill(which, state, elapsed=null){
-  const p = pills[which]; if (!p) return;
-  p.classList.remove('ok','run','err');
+// Reset button
+el('btnReset').addEventListener('click', () => location.reload());
+
+// Utility: set pill state
+function setPill(which, state) {
+  const p = pills[which];
+  if (!p) return;
+  p.classList.remove('ok', 'run', 'err');
   if (state) p.classList.add(state);
-  if (elapsed !== null){
-    const em = p.querySelector('em');
-    if (em) em.textContent = `(${elapsed.toFixed(1)}s)`;
-  }
 }
-function start(which){ t0[which] = performance.now(); setPill(which,'run',0); }
-function ok(which){ const dt=(performance.now()-t0[which])/1000; setPill(which,'ok',dt); }
-function err(which){ const dt=(performance.now()-t0[which])/1000; setPill(which,'err',dt); }
 
-function setBanner(msg, kind='info'){
+// Utility: set banner message
+function setBanner(msg, kind = 'info') {
   const b = el('banner');
-  if (!msg){ b.hidden = true; b.textContent=''; return; }
-  b.hidden = false; b.textContent = msg;
+  if (!msg) { b.hidden = true; return; }
+  b.hidden = false;
+  b.textContent = msg;
   b.className = `banner ${kind}`;
 }
 
-// -------------------- Elements --------------------
-const fileInput = el('fileInput');
-const dropArea  = el('dropArea');
-const imgOriginal = el('imgOriginal');
-const imgCrop     = el('imgCrop');
-
-const outDate = el('resDate');
-const outTime = el('resTime');
-const outLat  = el('resLat');
-const outLon  = el('resLon');
-const outAddr = el('resAddr');
-const outWard = el('resWard');
-const outBeat = el('resBeat');
-const outPS   = el('resPS');
-
-el('btnReset').addEventListener('click', () => location.reload());
-
-// -------------------- Drag & drop / click --------------------
-dropArea.addEventListener('click', ()=> fileInput.click());
-dropArea.addEventListener('keydown', (e)=>{ if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
-fileInput.addEventListener('click', (e)=>{ e.target.value = ''; }); // prevent double select prompt
-
-fileInput.addEventListener('change', onFileChosen);
-['dragenter','dragover'].forEach(type => dropArea.addEventListener(type, (e)=>{e.preventDefault();dropArea.classList.add('dragover');}));
-['dragleave','drop'].forEach(type => dropArea.addEventListener(type, (e)=>{e.preventDefault();dropArea.classList.remove('dragover');}));
-dropArea.addEventListener('drop', (e)=>{
-  const f = [...(e.dataTransfer?.files||[])].find(f=>/^image\/(jpe?g|png)$/i.test(f.type));
-  if (f) handleFile(f);
-});
-
-// -------------------- Google Form mapping --------------------
+// -------------------- Google Form Mapping --------------------
 const FORM_BASE = 'https://docs.google.com/forms/d/e/1FAIpQLSeo-xlOSxvG0IwtO5MkKaTJZNJkgTsmgZUw-FBsntFlNdRnCw/viewform?usp=pp_url';
-// entries: date, time, 1=lon, 2=lat, 3=ward, 4=beat, 5=address, 6=police station
 const ENTRY = {
   date: 'entry.1911996449',
   time: 'entry.1421115881',
-  lon : 'entry.113122688',
   lat : 'entry.419288992',
+  lon : 'entry.113122688',
   ward: 'entry.1625337207',
   beat: 'entry.1058310891',
   addr: 'entry.1188611077',
   ps  : 'entry.1555105834'
 };
 
-// -------------------- Core flow --------------------
-async function onFileChosen(e){
-  const f = e.target.files?.[0];
-  if (f) handleFile(f);
-}
+// -------------------- Drag & Drop --------------------
+// Allow drag-drop or click to select an image
 
-async function handleFile(file){
+dropArea.addEventListener('click', () => fileInput.click());
+dropArea.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
+fileInput.addEventListener('click', (e) => { e.target.value = ''; });
+fileInput.addEventListener('change', (e) => { const f = e.target.files?.[0]; if (f) handleFile(f); });
+
+['dragenter','dragover'].forEach(t => dropArea.addEventListener(t, e => { e.preventDefault(); dropArea.classList.add('dragover'); }));
+['dragleave','drop'].forEach(t => dropArea.addEventListener(t, e => { e.preventDefault(); dropArea.classList.remove('dragover'); }));
+dropArea.addEventListener('drop', (e) => {
+  const f = [...(e.dataTransfer?.files || [])].find(f => /^image\//i.test(f.type));
+  if (f) handleFile(f);
+});
+
+// -------------------- Core Flow --------------------
+async function handleFile(file) {
+  // Step 1: Validate file
   if (!/^image\/(jpe?g|png)$/i.test(file.type)) {
-    alert('Please choose a JPG or PNG.');
+    setBanner('Please choose a JPG or PNG.', 'error');
     return;
   }
 
-  // Reset state
-  setBanner('');
-  ['upload','ocr','parse','review','redirect'].forEach(k=>setPill(k,null,0));
-  outDate.textContent = outTime.textContent = outLat.textContent = outLon.textContent = outAddr.textContent =
-  outWard.textContent = outBeat.textContent = outPS.textContent = '—';
-  imgOriginal.src = ''; imgCrop.src='';
+  // Reset UI outputs
+  resetOutputs();
 
-  start('upload');
+  // Step 2: Upload image
+  setPill('upload', 'run');
   const dataURL = await fileToDataURL(file);
   imgOriginal.src = dataURL;
-  ok('upload');
+  setPill('upload', 'ok');
 
-  // Crop HUD (bottom band, trim left to skip map tile)
+  // Step 3: Crop HUD (bottom box with GPS info)
+  setPill('ocr', 'run');
   const cropURL = await cropHud(dataURL);
   imgCrop.src = cropURL;
 
-  // OCR
-  start('ocr');
+  // Step 4: Run OCR on cropped section
   let text = '';
   try {
-    // quick language selection: default eng; if Devanagari in image, use hin
-    const lang = await maybeHindi(cropURL) ? 'hin' : 'eng';
-    const worker = Tesseract.createWorker(lang, 1, { logger: _=>{} });
+    const worker = Tesseract.createWorker('eng+hin+mar', 1, { logger: _ => {} });
     const res = await worker.recognize(cropURL);
     await worker.terminate();
-    text = (res?.data?.text || '').replace(/\r/g,'').trim();
-    ok('ocr');
+    text = (res?.data?.text || '').trim();
+    setPill('ocr', 'ok');
   } catch (e) {
-    err('ocr');
-    setBanner('OCR failed. Try a clearer image with the GPS HUD fully visible.', 'error');
+    setPill('ocr', 'err');
+    setBanner('OCR failed. Try clearer photo.', 'error');
     return;
   }
 
-  // Parse
-  start('parse');
+  // Step 5: Parse OCR output
+  setPill('parse', 'run');
   const parsed = parseHudText(text);
   if (!parsed.date || !parsed.time || !parsed.lat || !parsed.lon || !parsed.address) {
-    err('parse');
-    setBanner('Could not parse all fields from the HUD. Ensure the HUD box is fully legible.', 'error');
+    setPill('parse', 'err');
+    setBanner('Could not parse all fields from HUD.', 'error');
     return;
   }
-  ok('parse');
+  setPill('parse', 'ok');
 
-  // Display parsed
+  // Display parsed values
   outDate.textContent = parsed.date;
   outTime.textContent = parsed.time;
   outLat.textContent  = parsed.lat.toFixed(6);
   outLon.textContent  = parsed.lon.toFixed(6);
   outAddr.textContent = parsed.address;
 
-  // GeoJSON lookup
+  // Step 6: GeoJSON lookup
+  setPill('geo', 'run');
   await ensureGeo();
   const gj = geoLookup(parsed.lat, parsed.lon);
   outWard.textContent = gj.ward || '—';
   outBeat.textContent = gj.beat || '—';
   outPS.textContent   = gj.ps   || '—';
-  ok('review');
+  if (!gj.ward || !gj.beat || !gj.ps) {
+    setPill('geo', 'err');
+    setBanner('GeoJSON lookup failed.', 'error');
+    return;
+  }
+  setPill('geo', 'ok');
 
-  // Conditional redirect
-  if (gj.ward && gj.beat && gj.ps && parsed.lat && parsed.lon && parsed.address) {
-    start('redirect');
-    const url = new URL(FORM_BASE);
-    url.searchParams.set(ENTRY.date, parsed.date);
-    url.searchParams.set(ENTRY.time, parsed.time);
-    url.searchParams.set(ENTRY.lon,  parsed.lon.toFixed(6));
-    url.searchParams.set(ENTRY.lat,  parsed.lat.toFixed(6));
-    url.searchParams.set(ENTRY.ward, gj.ward);
-    url.searchParams.set(ENTRY.beat, gj.beat);
-    url.searchParams.set(ENTRY.addr, parsed.address);
-    url.searchParams.set(ENTRY.ps,   gj.ps);
-    ok('redirect');
+  // Step 7: Review complete
+  setPill('review', 'ok');
+
+  // Step 8: Build Google Form URL and redirect
+  const url = new URL(FORM_BASE);
+  url.searchParams.set(ENTRY.date, parsed.date);
+  url.searchParams.set(ENTRY.time, parsed.time);
+  url.searchParams.set(ENTRY.lat, parsed.lat.toFixed(6));
+  url.searchParams.set(ENTRY.lon, parsed.lon.toFixed(6));
+  url.searchParams.set(ENTRY.ward, gj.ward);
+  url.searchParams.set(ENTRY.beat, gj.beat);
+  url.searchParams.set(ENTRY.addr, parsed.address);
+  url.searchParams.set(ENTRY.ps,   gj.ps);
+
+  try {
+    setPill('redirect', 'run');
     window.open(url.toString(), '_blank', 'noopener');
-  } else {
-    setBanner('Review: Missing Ward/Beat/PS or coordinates. Not redirecting.', 'error');
+    setPill('redirect', 'ok');
+  } catch {
+    setPill('redirect', 'err');
+    setBanner('Auto-redirect failed. Please use the button below.', 'error');
+    addManualRedirect(url.toString());
   }
 }
 
-// -------------------- File utils --------------------
-function fileToDataURL(file){
-  return new Promise((resolve,reject)=>{
+// Reset outputs between runs
+function resetOutputs() {
+  ['upload','ocr','parse','geo','review','redirect'].forEach(k => setPill(k, null));
+  [outDate,outTime,outLat,outLon,outAddr,outWard,outBeat,outPS].forEach(o => o.textContent = '—');
+  imgOriginal.src = '';
+  imgCrop.src = '';
+  setBanner('', 'info');
+}
+
+// Convert file to base64 data URL
+function fileToDataURL(file) {
+  return new Promise((resolve, reject) => {
     const fr = new FileReader();
     fr.onload = () => resolve(fr.result);
     fr.onerror = reject;
@@ -185,214 +197,117 @@ function fileToDataURL(file){
   });
 }
 
-// -------------------- Crop HUD (bottom bar, trim left) --------------------
-async function cropHud(dataURL){
+// -------------------- Crop Bottom HUD --------------------
+// Crop bottom 27% of image, trimming 25% left and 5% right
+async function cropHud(dataURL) {
   const img = await loadImage(dataURL);
   const W = img.naturalWidth, H = img.naturalHeight;
-
-  // Typical GPS Map Camera HUD is a bottom panel ~28–32% height.
-  const HUD_HEIGHT_FRAC = 0.30;
-  const LEFT_TRIM_FRAC  = 0.14; // trim left to skip map tile; adjust if needed
-
-  const cropH = Math.round(H * HUD_HEIGHT_FRAC);
-  const sy    = H - cropH;
-  const sx    = Math.round(W * LEFT_TRIM_FRAC);
-  const sw    = W - sx;
-  const sh    = cropH;
+  const sy = Math.floor(H * 0.73);
+  const sx = Math.floor(W * 0.25);
+  const sw = Math.floor(W * 0.70);
+  const sh = Math.floor(H * 0.27);
 
   const c = document.createElement('canvas');
-  c.width  = sw;
+  c.width = sw;
   c.height = sh;
   const ctx = c.getContext('2d');
   ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-  // (No preprocessing by default per your request)
   return c.toDataURL('image/png');
 }
 
-function loadImage(url){
-  return new Promise((resolve,reject)=>{
+// Helper: load image
+function loadImage(url) {
+  return new Promise((res, rej) => {
     const im = new Image();
-    im.onload = ()=> resolve(im);
-    im.onerror = reject;
+    im.onload = () => res(im);
+    im.onerror = rej;
     im.src = url;
   });
 }
 
-// -------------------- OCR language quick detector --------------------
-async function maybeHindi(dataURL){
-  // quick heuristic: sample pixels for strong red/orange HUD, but easier: run small eng OCR and detect Devanagari?
-  // Simpler: check for Devanagari in a fast pass with eng first; to keep it light just return false here.
-  // If you want, you can implement a tiny pass. Returning false keeps eng default reliable.
-  return false;
-}
-
 // -------------------- Parsing --------------------
-function parseHudText(raw){
-  // Normalize whitespace and explode lines
-  const txt = raw.split('\n').map(s=>s.trim()).filter(Boolean);
+// Parse OCR lines into address, lat/lon, date/time
+function parseHudText(raw) {
+  const lines = raw.split(/\n/).map(l => l.trim()).filter(Boolean);
+  if (lines.length < 3) return {};
 
-  // The overlay looks like:
-  // L1: Mumbai, Maharashtra, India
-  // L2: <address line 1> (might be single line or continues on L3)
-  // L3: (optional) <address line 2>
-  // L4: Lat 19.12311° Long 72.881551°
-  // L5: 18/08/2025 11:52 AM GMT +05:30   OR   2025-08-18 11:52
-  //
-  // Rules:
-  // - ignore line 1
-  // - gather lines 2 and (optional) 3 into address
-  // - second-last line (L4) has lat/lon
-  // - last line (L5) has date/time (strip GMT)
+  const last = lines[lines.length - 1]; // Date/time line
+  const prev = lines[lines.length - 2]; // Lat/lon line
+  const addrLines = lines.slice(1, lines.length - 2); // Address lines (1–3)
+  const address = addrLines.join(', ');
 
-  if (txt.length < 3) return {};
+  const latM = prev.match(/Lat[^0-9]*([+-]?[0-9]+\.?[0-9]*)/i);
+  const lonM = prev.match(/Long[^0-9]*([+-]?[0-9]+\.?[0-9]*)/i);
+  let lat = latM ? parseFloat(latM[1]) : NaN;
+  let lon = lonM ? parseFloat(lonM[1]) : NaN;
 
-  const last  = txt[txt.length-1] || '';
-  const prev  = txt[txt.length-2] || '';
-  const l2    = txt[1] || '';
-  const l3    = txt.length > 3 ? txt[2] : '';
-
-  const address = [l2, l3].filter(Boolean).join(', ').replace(/\s{2,}/g,' ').trim();
-
-  // lat / long patterns
-  const latR  = /Lat(?:itude)?[:\s]*([+-]?\d{1,3}(?:\.\d+)?)/i;
-  const lonR  = /Long(?:itude)?[:\s]*([+-]?\d{1,3}(?:\.\d+)?)/i;
-  const deg   = /°/g;
-
-  let lat = NaN, lon = NaN;
-  const llLine = prev.replace(deg,'');
-  const latM = llLine.match(latR);
-  const lonM = llLine.match(lonR);
-
-  if (latM) lat = normalizeNumber(latM[1], 'lat');
-  if (lonM) lon = normalizeNumber(lonM[1], 'lon');
-
-  // date / time
-  // Accept: 18/08/2025 11:52 AM GMT +05:30 OR ISO-like
   let date = '', time = '';
-  let L = last.replace(/GMT.*$/i,'').trim(); // drop GMT part if present
-
-  // dd/mm/yyyy hh:mm am/pm
-  const dt1 = /(\d{1,2}\/\d{1,2}\/\d{4})\s+(\d{1,2}:\d{2}(?:\s*[AP]M)?)/i;
-  // yyyy-mm-dd hh:mm
-  const dt2 = /(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2}(?:\s*[AP]M)?)/i;
-
-  let m = L.match(dt1) || L.match(dt2);
-  if (m){ date = m[1]; time = m[2].replace(/\s+/g,' ').trim(); }
+  const dt = last.replace(/GMT.*$/,'').trim();
+  const m = dt.match(/(\d{1,2}\/\d{1,2}\/\d{4})\s+(\d{1,2}:\d{2}(?:\s*[AP]M)?)/)
+         || dt.match(/(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2}(?:\s*[AP]M)?)/);
+  if (m) { date = m[1]; time = m[2]; }
 
   return { address, lat, lon, date, time };
 }
 
-function normalizeNumber(val, kind){
-  let n = Number(val);
-  if (!Number.isFinite(n)) return NaN;
-  // fix “191234332.000000” style (missing decimal)
-  while ((kind === 'lat' && Math.abs(n) > 90) || (kind === 'lon' && Math.abs(n) > 180)) {
-    n = n / 10;
-    if (Math.abs(n) < 1000) break;
-  }
-  return n;
-}
+// -------------------- GeoJSON --------------------
+let gjW = null, gjB = null, gjP = null;
 
-// -------------------- GeoJSON (multi-path fallback + schema map) --------------------
-const GEO_BASES = ['data/', './data/', '../data/', '../../data/', ''];
-
-let gjW=null, gjB=null, gjP=null;
-
-async function fetchJSONWithFallback(filename){
-  for (const base of GEO_BASES) {
-    try {
-      const url = new URL(base + filename, location.href).toString();
-      const res = await fetch(url, { cache:'no-store' });
-      if (res.ok) return await res.json();
-    } catch(_) {}
-  }
-  throw new Error(`GeoJSON not found: ${filename}`);
-}
-
-function getProp(feat, keys){
-  for (const k of keys){
-    const v = feat?.properties?.[k];
-    if (v !== undefined && v !== null && String(v).trim() !== '') return String(v);
-  }
-  return '';
-}
-
-async function ensureGeo(){
+// Load all geojson files
+async function ensureGeo() {
   if (gjW && gjB && gjP) return;
-  start('geo');
-  try {
-    const [wards, beats, ps] = await Promise.all([
-      fetchJSONWithFallback('wards.geojson'),
-      fetchJSONWithFallback('beats.geojson'),
-      fetchJSONWithFallback('police_jurisdiction.geojson'),
-    ]);
-    gjW = wards; gjB = beats; gjP = ps;
-    ok('geo');
-    setBanner(`GeoJSON loaded — Wards: ${gjW.features?.length||0} • Beats: ${gjB.features?.length||0} • PS: ${gjP.features?.length||0}`, 'info');
-  } catch (e) {
-    err('geo');
-    setBanner(`Failed to load GeoJSON from /data. ${e.message}`, 'error');
-  }
+  const [w, b, p] = await Promise.all([
+    fetch('data/wards.geojson').then(r => r.json()),
+    fetch('data/beats.geojson').then(r => r.json()),
+    fetch('data/police_jurisdiction.geojson').then(r => r.json()),
+  ]);
+  gjW = w; gjB = b; gjP = p;
 }
 
-function pointInPoly(poly, x, y){
-  let inside=false;
-  for (const ring of poly){
-    for (let i=0, j=ring.length-1; i<ring.length; j=i++){
-      const xi=ring[i][0], yi=ring[i][1];
-      const xj=ring[j][0], yj=ring[j][1];
-      const inter = ((yi>y)!==(yj>y)) && (x < (xj - xi)*(y - yi)/(yj - yi) + xi);
-      if (inter) inside = !inside;
+// Lookup ward, beat, police station
+function geoLookup(lat, lon) {
+  const out = { ward: '', beat: '', ps: '' };
+  if (!gjW || !gjB || !gjP) return out;
+
+  const pt = [lon, lat];
+  const inPoly = (g) => {
+    if (g.type === 'Polygon') return pointInPoly(g.coordinates, pt);
+    if (g.type === 'MultiPolygon') return g.coordinates.some(r => pointInPoly(r, pt));
+    return false;
+  };
+
+  for (const f of gjW.features) { if (inPoly(f.geometry)) { out.ward = f.properties.WARD || ''; break; } }
+  for (const f of gjB.features) { if (inPoly(f.geometry)) { out.beat = f.properties.BEAT_NO || ''; break; } }
+  for (const f of gjP.features) { if (inPoly(f.geometry)) { out.ps   = f.properties.PS_NAME || ''; break; } }
+
+  return out;
+}
+
+// Point-in-polygon check
+function pointInPoly(poly, pt) {
+  const [x, y] = pt;
+  let inside = false;
+  for (const ring of poly) {
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const xi = ring[i][0], yi = ring[i][1];
+      const xj = ring[j][0], yj = ring[j][1];
+      const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+      if (intersect) inside = !inside;
     }
   }
   return inside;
 }
 
-function geoLookup(lat, lon){
-  const LON = +lon, LAT = +lat;
-  const out = { ward:'', beat:'', ps:'' };
-  if (!Number.isFinite(LON) || !Number.isFinite(LAT)) return out;
-
-  // wards
-  for (const f of (gjW?.features || [])){
-    const g = f.geometry; if (!g) continue;
-    const name = getProp(f, ['WARD','Ward','ward','NAME','Name']);
-    if (!name) continue;
-    if (g.type==='Polygon' && pointInPoly(g.coordinates, LON, LAT)){ out.ward=name; break; }
-    if (g.type==='MultiPolygon'){
-      for (const p of g.coordinates) if (pointInPoly(p, LON, LAT)){ out.ward=name; break; }
-      if (out.ward) break;
-    }
+// -------------------- Manual Redirect --------------------
+// If auto redirect fails, show a button for manual opening
+function addManualRedirect(url) {
+  let btn = el('manualRedirect');
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.id = 'manualRedirect';
+    btn.className = 'btn btn-primary';
+    btn.textContent = 'Open Google Form';
+    btn.onclick = () => window.open(url, '_blank', 'noopener');
+    document.body.appendChild(btn);
   }
-
-  // beats
-  for (const f of (gjB?.features || [])){
-    const g = f.geometry; if (!g) continue;
-    const name = getProp(f, ['BEAT','Beat','beat','BEAT_NO','BEATNO','NAME','Name']);
-    if (!name) continue;
-    if (g.type==='Polygon' && pointInPoly(g.coordinates, LON, LAT)){ out.beat=name; break; }
-    if (g.type==='MultiPolygon'){
-      for (const p of g.coordinates) if (pointInPoly(p, LON, LAT)){ out.beat=name; break; }
-      if (out.beat) break;
-    }
-  }
-
-  // police station
-  for (const f of (gjP?.features || [])){
-    const g = f.geometry; if (!g) continue;
-    const name = getProp(f, ['PS','PS_NAME','PSName','Police_Stn','POLICE_ST','NAME','Name']);
-    if (!name) continue;
-    if (g.type==='Polygon' && pointInPoly(g.coordinates, LON, LAT)){ out.ps=name; break; }
-    if (g.type==='MultiPolygon'){
-      for (const p of g.coordinates) if (pointInPoly(p, LON, LAT)){ out.ps=name; break; }
-      if (out.ps) break;
-    }
-  }
-
-  return out;
 }
-
-// ---------------------------------------------------
-setPill('upload',null,0); setPill('ocr',null,0); setPill('parse',null,0);
-setPill('geo',null,0); setPill('review',null,0); setPill('redirect',null,0);
-setBanner('Ready. Upload a GPS Map Camera photo; HUD will be read and parsed.', 'info');
