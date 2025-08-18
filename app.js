@@ -289,7 +289,7 @@ async function handleFile(file){
       gj = gj2;
     }
   }
-  logToConsole('', { matched: gj }, '[Geo match]');
+ logToConsole('', { ward: outWard?.textContent, beat: outBeat?.textContent, ps: outPS?.textContent }, '[Geo resolved]');
 
   if(!gj.ward || !gj.beat || !gj.ps){ setPill('geo','err'); banner('GeoJSON lookup failed.','error'); return; }
   outWard && (outWard.textContent = gj.ward);
@@ -481,14 +481,55 @@ function inPoly(poly,[x,y]){
   }
   return inside;
 }
-function geoLookup(lat,lon){
-  const out={ward:'',beat:'',ps:''}; if(!gjW||!gjB||!gjP) return out;
-  const pt=[lon,lat];
-  const inG=(g)=> g?.type==='Polygon' ? inPoly(g.coordinates,pt)
-            : g?.type==='MultiPolygon' ? g.coordinates.some(r=>inPoly(r,pt)) : false;
-  for(const f of gjW.features) if(inG(f.geometry)){ out.ward = f.properties.WARD ?? f.properties.ward_no ?? f.properties.ward ?? ''; break; }
-  for(const f of gjB.features) if(inG(f.geometry)){ out.beat = f.properties.BEAT_NO ?? f.properties.beat ?? f.properties.beat_no ?? ''; break; }
-  for(const f of gjP.features) if(inG(f.geometry)){ out.ps   = f.properties.PS_NAME ?? f.properties.ps_name ?? f.properties.PSNAME ?? ''; break; }
+function geoLookup(lat, lon){
+  const out = { ward:'', beat:'', ps:'' };
+  if (!gjW || !gjB || !gjP) return out;
+
+  const pt = [lon, lat];
+  const inG = (g) =>
+    g?.type === 'Polygon' ? inPoly(g.coordinates, pt)
+    : g?.type === 'MultiPolygon' ? g.coordinates.some(r => inPoly(r, pt))
+    : false;
+
+  // WARD
+  for (const f of gjW.features) {
+    if (inG(f.geometry)) {
+      out.ward = f.properties.WARD
+              ?? f.properties.NAME
+              ?? f.properties.ward_no
+              ?? f.properties.ward
+              ?? f.properties.name
+              ?? '';
+      break;
+    }
+  }
+
+  // BEAT
+  for (const f of gjB.features) {
+    if (inG(f.geometry)) {
+      out.beat = f.properties.BEAT_NO
+              ?? f.properties.NAME
+              ?? f.properties.beat_no
+              ?? f.properties.beat
+              ?? f.properties.name
+              ?? '';
+      break;
+    }
+  }
+
+  // POLICE STATION
+  for (const f of gjP.features) {
+    if (inG(f.geometry)) {
+      out.ps = f.properties.PS_NAME
+            ?? f.properties.NAME
+            ?? f.properties.ps_name
+            ?? f.properties.PSNAME
+            ?? f.properties.name
+            ?? '';
+      break;
+    }
+  }
+
   return out;
 }
 
