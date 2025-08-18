@@ -1,22 +1,10 @@
 /* ==========================================================
    Abandoned Vehicles – Marshal Upload (MCGM)
-   Version: v2025.08.19.P.2.2
-   ----------------------------------------------------------
-   - Drag & drop + single picker
-   - Static crop of HUD section (bottom portion of photo)
-   - OCR with Tesseract.js v5 (eng+hin+mar)
-   - Garbage removal (ignore line1 branding)
-   - Parse rules:
-       line1 ignored (branding/city)
-       address = middle lines
-       second-last = Lat/Lon
-       last = Date/Time
-   - Date normalized to YYYY-MM-DD
-   - Time normalized to HH:mm (24h)
-   - GeoJSON lookup (wards, beats, police)
-   - Auto redirect to Google Form; fallback manual button
-   - On-page console for debugging (raw OCR + parsed)
-   ========================================================== */
+   Version: v2025.08.19.P.2.3 (hotfix)
+   - Guards around console pane (won’t crash if missing)
+   - Geo fetch: explicit error surfacing
+   - Same flow, same UI hooks as P.2.2
+   ---------------------------------------------------------- */
 
 const el = (id) => document.getElementById(id);
 
@@ -47,9 +35,10 @@ const pills = {
 };
 
 // Reset
-el('btnReset').addEventListener('click', () => location.reload());
+const resetBtn = el('btnReset');
+if (resetBtn) resetBtn.addEventListener('click', () => location.reload());
 
-// Console log section
+// -------------------- On‑page Console (guarded) --------------------
 const logBox = el('consoleLog');
 function logToConsole(raw, parsed, label = '') {
   const now = new Date();
@@ -60,7 +49,13 @@ function logToConsole(raw, parsed, label = '') {
     parsed ? `--- PARSED FIELDS ---\n${JSON.stringify(parsed, null, 2)}` : '',
     '────────────────────────────────────────'
   ].filter(Boolean).join('\n');
-  logBox.textContent = msg + '\n' + logBox.textContent;
+
+  if (logBox) {
+    logBox.textContent = msg + '\n' + logBox.textContent;
+  } else {
+    // Fallback to browser console – avoids breaking the app
+    console.log(msg);
+  }
 }
 
 // Utility: set pill state
@@ -74,6 +69,7 @@ function setPill(which, state) {
 // Utility: set banner message
 function setBanner(msg, kind='info') {
   const b = el('banner');
+  if (!b) return;
   if (!msg) { b.hidden = true; return; }
   b.hidden = false;
   b.textContent = msg;
@@ -94,112 +90,133 @@ const ENTRY = {
 };
 
 // -------------------- Drag & Drop --------------------
-dropArea.addEventListener('click', () => fileInput.click());
-dropArea.addEventListener('keydown', (e) => { if(e.key==='Enter'||e.key===' ') fileInput.click(); });
-fileInput.addEventListener('click', (e) => { e.target.value=''; });
-fileInput.addEventListener('change', (e) => { const f=e.target.files?.[0]; if(f) handleFile(f); });
+if (dropArea && fileInput) {
+  dropArea.addEventListener('click', () => fileInput.click());
+  dropArea.addEventListener('keydown', (e) => { if(e.key==='Enter'||e.key===' ') fileInput.click(); });
+  fileInput.addEventListener('click', (e) => { e.target.value=''; });
+  fileInput.addEventListener('change', (e) => { const f=e.target.files?.[0]; if(f) handleFile(f); });
 
-['dragenter','dragover'].forEach(t => dropArea.addEventListener(t,e=>{e.preventDefault();dropArea.classList.add('dragover');}));
-['dragleave','drop'].forEach(t => dropArea.addEventListener(t,e=>{e.preventDefault();dropArea.classList.remove('dragover');}));
-dropArea.addEventListener('drop',(e)=>{
-  const f=[...(e.dataTransfer?.files||[])].find(f=>/^image\//i.test(f.type));
-  if(f) handleFile(f);
-});
+  ['dragenter','dragover'].forEach(t => dropArea.addEventListener(t,e=>{e.preventDefault();dropArea.classList.add('dragover');}));
+  ['dragleave','drop'].forEach(t => dropArea.addEventListener(t,e=>{e.preventDefault();dropArea.classList.remove('dragover');}));
+  dropArea.addEventListener('drop',(e)=>{
+    const f=[...(e.dataTransfer?.files||[])].find(f=>/^image\//i.test(f.type));
+    if(f) handleFile(f);
+  });
+}
 
 // -------------------- Core Flow --------------------
 async function handleFile(file){
-  if(!/^image\/(jpe?g|png)$/i.test(file.type)){
-    setBanner('Please choose a JPG or PNG.','error');
-    return;
-  }
-
-  resetOutputs();
-
-  setPill('upload','run');
-  const dataURL=await fileToDataURL(file);
-  imgOriginal.src=dataURL;
-  setPill('upload','ok');
-
-  setPill('ocr','run');
-  const cropURL=await cropHud(dataURL);
-  imgCrop.src=cropURL;
-
-  let text='';
   try {
-    const res=await Tesseract.recognize(
-      cropURL,
-      'eng+hin+mar',
-      { logger:_=>{}, tessedit_pageseg_mode:6 }
-    );
-    text=(res?.data?.text||'').trim();
-    logToConsole(text,null,'[OCR complete]');
-    setPill('ocr','ok');
-  }catch(e){
-    console.error('Tesseract error:',e);
-    setPill('ocr','err');
-    setBanner('OCR failed.','error');
-    return;
-  }
+    if(!/^image\/(jpe?g|png)$/i.test(file.type)){
+      setBanner('Please choose a JPG or PNG.','error');
+      return;
+    }
 
-  setPill('parse','run');
-  const parsed=parseHudText(text);
-  logToConsole(text,parsed,'[Parse complete]');
-  if(!parsed.date||!parsed.time||isNaN(parsed.lat)||isNaN(parsed.lon)||!parsed.address){
-    setPill('parse','err');
-    setBanner('Could not parse all fields.','error');
-    return;
-  }
-  setPill('parse','ok');
+    resetOutputs();
 
-  outDate.textContent=parsed.date;
-  outTime.textContent=parsed.time;
-  outLat.textContent=parsed.lat.toFixed(6);
-  outLon.textContent=parsed.lon.toFixed(6);
-  outAddr.textContent=parsed.address;
+    setPill('upload','run');
+    const dataURL=await fileToDataURL(file);
+    if (imgOriginal) imgOriginal.src=dataURL;
+    setPill('upload','ok');
 
-  setPill('geo','run');
-  await ensureGeo();
-  const gj=geoLookup(parsed.lat,parsed.lon);
-  outWard.textContent=gj.ward||'—';
-  outBeat.textContent=gj.beat||'—';
-  outPS.textContent=gj.ps||'—';
-  logToConsole('',{matched:gj},'[Geo match]');
-  if(!gj.ward||!gj.beat||!gj.ps){
-    setPill('geo','err');
-    setBanner('GeoJSON lookup failed.','error');
-    return;
-  }
-  setPill('geo','ok');
+    setPill('ocr','run');
+    const cropURL=await cropHud(dataURL);
+    if (imgCrop) imgCrop.src=cropURL;
 
-  setPill('review','ok');
+    let text='';
+    try {
+      if (!window.Tesseract) {
+        setPill('ocr','err');
+        setBanner('CDN not loaded: Tesseract is unavailable.','error');
+        logToConsole('Tesseract missing', null, '[CDN error]');
+        return;
+      }
+      const res=await Tesseract.recognize(
+        cropURL,
+        'eng+hin+mar',
+        { logger:_=>{}, tessedit_pageseg_mode:6 }
+      );
+      text=(res?.data?.text||'').trim();
+      logToConsole(text,null,'[OCR complete]');
+      setPill('ocr','ok');
+    }catch(e){
+      setPill('ocr','err');
+      setBanner('OCR failed.','error');
+      logToConsole(String(e), null, '[OCR error]');
+      return;
+    }
 
-  const url=new URL(FORM_BASE);
-  url.searchParams.set(ENTRY.date,parsed.date);
-  url.searchParams.set(ENTRY.time,parsed.time);
-  url.searchParams.set(ENTRY.lat,parsed.lat.toFixed(6));
-  url.searchParams.set(ENTRY.lon,parsed.lon.toFixed(6));
-  url.searchParams.set(ENTRY.ward,gj.ward);
-  url.searchParams.set(ENTRY.beat,gj.beat);
-  url.searchParams.set(ENTRY.addr,parsed.address);
-  url.searchParams.set(ENTRY.ps,gj.ps);
+    setPill('parse','run');
+    const parsed=parseHudText(text);
+    logToConsole(text,parsed,'[Parse complete]');
+    if(!parsed.date||!parsed.time||isNaN(parsed.lat)||isNaN(parsed.lon)||!parsed.address){
+      setPill('parse','err');
+      setBanner('Could not parse all fields.','error');
+      return;
+    }
+    setPill('parse','ok');
 
-  try{
-    setPill('redirect','run');
-    window.open(url.toString(),'_blank','noopener');
-    setPill('redirect','ok');
-  }catch{
-    setPill('redirect','err');
-    setBanner('Auto-redirect failed.','error');
-    addManualRedirect(url.toString());
+    if (outDate) outDate.textContent=parsed.date;
+    if (outTime) outTime.textContent=parsed.time;
+    if (outLat)  outLat.textContent=parsed.lat.toFixed(6);
+    if (outLon)  outLon.textContent=parsed.lon.toFixed(6);
+    if (outAddr) outAddr.textContent=parsed.address;
+
+    setPill('geo','run');
+    try {
+      await ensureGeo();
+      const gj=geoLookup(parsed.lat,parsed.lon);
+      if (outWard) outWard.textContent=gj.ward||'—';
+      if (outBeat) outBeat.textContent=gj.beat||'—';
+      if (outPS)   outPS.textContent  =gj.ps  ||'—';
+      logToConsole('',{matched:gj},'[Geo match]');
+      if(!gj.ward||!gj.beat||!gj.ps){
+        setPill('geo','err');
+        setBanner('GeoJSON lookup failed.','error');
+        return;
+      }
+      setPill('geo','ok');
+    } catch (gerr) {
+      setPill('geo','err');
+      setBanner('Failed to load/parse GeoJSON (see console).','error');
+      logToConsole(String(gerr), null, '[Geo error]');
+      return;
+    }
+
+    setPill('review','ok');
+
+    const url=new URL(FORM_BASE);
+    url.searchParams.set(ENTRY.date,parsed.date);
+    url.searchParams.set(ENTRY.time,parsed.time);
+    url.searchParams.set(ENTRY.lat,parsed.lat.toFixed(6));
+    url.searchParams.set(ENTRY.lon,parsed.lon.toFixed(6));
+    url.searchParams.set(ENTRY.ward,el('resWard')?.textContent||'');
+    url.searchParams.set(ENTRY.beat,el('resBeat')?.textContent||'');
+    url.searchParams.set(ENTRY.addr,parsed.address);
+    url.searchParams.set(ENTRY.ps,  el('resPS')?.textContent||'');
+
+    try{
+      setPill('redirect','run');
+      window.open(url.toString(),'_blank','noopener');
+      setPill('redirect','ok');
+    }catch{
+      setPill('redirect','err');
+      setBanner('Auto-redirect failed.','error');
+      addManualRedirect(url.toString());
+    }
+  } catch (fatal) {
+    setBanner('Unexpected error (see console).','error');
+    logToConsole(String(fatal), null, '[Fatal]');
   }
 }
 
 function resetOutputs(){
   ['upload','ocr','parse','geo','review','redirect'].forEach(k=>setPill(k,null));
-  [outDate,outTime,outLat,outLon,outAddr,outWard,outBeat,outPS].forEach(o=>o.textContent='—');
-  imgOriginal.src=''; imgCrop.src='';
+  [outDate,outTime,outLat,outLon,outAddr,outWard,outBeat,outPS].forEach(o=>{ if(o) o.textContent='—'; });
+  if (imgOriginal) imgOriginal.src='';
+  if (imgCrop)     imgCrop.src='';
   setBanner('','info');
-  logBox.textContent='';
+  if (logBox) logBox.textContent='';
 }
 
 function fileToDataURL(file){
@@ -211,13 +228,14 @@ function fileToDataURL(file){
   });
 }
 
-// -------------------- HUD Crop --------------------
+// -------------------- HUD Crop (static box with cushion) --------------------
 async function cropHud(dataURL){
   const img=await loadImage(dataURL);
   const W=img.naturalWidth,H=img.naturalHeight;
 
-  const sy=Math.floor(H*0.62);
-  const sh=Math.floor(H*0.34);
+  // Relaxed bottom crop as agreed
+  const sy=Math.floor(H*0.60);
+  const sh=Math.floor(H*0.36);
   const sx=Math.floor(W*0.22);
   const sw=Math.floor(W*0.76);
 
@@ -239,12 +257,14 @@ function loadImage(url){
 
 // -------------------- Date/Time Normalizers --------------------
 function normalizeDate(dstr){
+  // "18/08/2025" -> "2025-08-18"
   const m=dstr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
   if(!m) return dstr;
   const [ , dd, mm, yyyy]=m;
   return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
 }
 function normalizeTime(tstr){
+  // "03:09 PM" -> "15:09"
   const m=tstr.match(/(\d{1,2}):(\d{2})(?:\s*([AP]M))?/i);
   if(!m) return tstr;
   let [ , hh, mm, ap]=m;
@@ -261,6 +281,7 @@ function parseHudText(raw){
   const lines=raw.split(/\n/).map(l=>l.trim()).filter(Boolean);
   if(lines.length<3) return {};
 
+  // Ignore first heading/branding line entirely
   const last=lines[lines.length-1];
   const prev=lines[lines.length-2];
   const addrLines=lines.slice(1,lines.length-2);
@@ -285,15 +306,23 @@ function parseHudText(raw){
 
 // -------------------- GeoJSON Lookup --------------------
 let gjW=null,gjB=null,gjP=null;
+
 async function ensureGeo(){
   if(gjW&&gjB&&gjP) return;
+
+  const fetchJson = async (path) => {
+    const r = await fetch(path, { cache:'no-store' });
+    if (!r.ok) throw new Error(`Fetch ${path} -> ${r.status} ${r.statusText}`);
+    return r.json();
+  };
+
   const [w,b,p]=await Promise.all([
-    fetch('data/wards.geojson').then(r=>r.json()),
-    fetch('data/beats.geojson').then(r=>r.json()),
-    fetch('data/police_jurisdiction.geojson').then(r=>r.json())
+    fetchJson('data/wards.geojson'),
+    fetchJson('data/beats.geojson'),
+    fetchJson('data/police_jurisdiction.geojson')
   ]);
+
   gjW=w; gjB=b; gjP=p;
-  logToConsole('',{wards:w.features.length,beats:b.features.length,police:p.features.length},'[GeoJSON loaded]');
 }
 
 function geoLookup(lat,lon){
@@ -302,9 +331,10 @@ function geoLookup(lat,lon){
   const pt=[lon,lat];
   const inG=(g)=>g?.type==='Polygon'?pointInPoly(g.coordinates,pt):g?.type==='MultiPolygon'?g.coordinates.some(r=>pointInPoly(r,pt)):false;
 
+  // property name fallbacks (handles your datasets)
   for(const f of gjW.features){ if(inG(f.geometry)){ out.ward=f.properties.WARD??f.properties.NAME??f.properties.name??''; break; } }
   for(const f of gjB.features){ if(inG(f.geometry)){ out.beat=f.properties.BEAT_NO??f.properties.NAME??f.properties.name??''; break; } }
-  for(const f of gjP.features){ if(inG(f.geometry)){ out.ps=f.properties.PS_NAME??f.properties.NAME??f.properties.name??''; break; } }
+  for(const f of gjP.features){ if(inG(f.geometry)){ out.ps  =f.properties.PS_NAME ??f.properties.NAME??f.properties.name??''; break; } }
 
   return out;
 }
