@@ -1,109 +1,103 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>MCGM — Abandoned Vehicles (Marshal Upload)</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>MCGM | Abandoned Vehicles — Marshal Upload</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <!-- HEADER (single row: brand left, actions right) -->
-  <header class="topbar">
-    <div class="topbar-row">
-      <div class="brand">
-        <img class="logo" src="https://www.mcgm.gov.in/com.mcgm.newframework/images/logo_V1.png" alt="MCGM Logo">
-        <div class="titles">
-          <div class="title">Municipal Corporation of Greater Mumbai</div>
-          <div class="subtitle">Abandoned Vehicles – Identification &amp; Pre-Notice (Marshal Upload)</div>
-        </div>
-      </div>
-
-      <div class="actions">
-        <div class="cdn-badge">CDN: v5 (jsDelivr)</div>
-        <button class="btn reset" data-action="reset" type="button" title="Reset all">Reset</button>
-        <!-- Example “Cancel” button if/when you need it somewhere -->
-        <!-- <button class="btn cancel" type="button">Cancel</button> -->
+  <!-- Header -->
+  <header class="app-header">
+    <div class="header-left">
+      <img src="https://www.mcgm.gov.in/com.mcgm.newframework/images/logo_V1.png" alt="MCGM" class="logo">
+      <div class="header-title">
+        <div class="title-main">Municipal Corporation of Greater Mumbai</div>
+        <div class="title-sub">Abandoned Vehicles – Identification &amp; Pre-Notice (Marshal Upload)</div>
       </div>
     </div>
-
-    <div class="saffron-line"></div>
+    <div class="header-right">
+      <span class="cdn-pill" id="cdn-pill">CDN: v5 (jsDelivr)</span>
+      <button id="btn-reset" class="btn btn--danger">Reset</button>
+    </div>
   </header>
 
-  <!-- STAGE PILLS (sticky under the header; with timings in brackets) -->
-  <section class="stages stages-sticky">
-    <span class="stage-pill pending" id="stage-upload"><span class="icon">⬆️</span>Upload <span class="pill-time" data-time="Upload">(0.0s)</span></span>
-    <span class="stage-pill pending" id="stage-ocr"><span class="icon">🔎</span>OCR <span class="pill-time" data-time="OCR">(0.0s)</span></span>
-    <span class="stage-pill pending" id="stage-parse"><span class="icon">🧩</span>Parse <span class="pill-time" data-time="Parse">(0.0s)</span></span>
-    <span class="stage-pill pending" id="stage-geojson"><span class="icon">🗺️</span>GeoJSON <span class="pill-time" data-time="GeoJSON">(0.0s)</span></span>
-    <span class="stage-pill pending" id="stage-review"><span class="icon">📝</span>Review <span class="pill-time" data-time="Review">(0.0s)</span></span>
-    <span class="stage-pill pending" id="stage-redirect"><span class="icon">➡️</span>Redirect <span class="pill-time" data-time="Redirect">(0.0s)</span></span>
-  </section>
+  <!-- Pills -->
+  <nav class="pillbar">
+    <div class="pill pill--idle" data-pill="upload"><span class="pill__dot"></span> Upload <span class="pill__time"></span></div>
+    <div class="pill pill--idle" data-pill="ocr"><span class="pill__dot"></span> OCR <span class="pill__time"></span></div>
+    <div class="pill pill--idle" data-pill="parse"><span class="pill__dot"></span> Parse <span class="pill__time"></span></div>
+    <div class="pill pill--idle" data-pill="geo"><span class="pill__dot"></span> GeoJSON <span class="pill__time"></span></div>
+    <div class="pill pill--idle" data-pill="review"><span class="pill__dot"></span> Review <span class="pill__time"></span></div>
+    <div class="pill pill--idle" data-pill="redirect"><span class="pill__dot"></span> Redirect <span class="pill__time"></span></div>
+  </nav>
 
-  <main class="container">
-    <div class="grid">
-      <!-- Left: Upload -->
-      <section class="card left-col">
-        <h3>Original Photo (25%)</h3>
-        <div id="dropzone" class="dropzone" title="Drop an image or click to choose">
-          <input id="fileInput" type="file" accept="image/*" hidden>
-          <div class="dz-instructions">
-            <div class="big-icon">🖼️</div>
-            <div class="dz-title">Tap to choose image</div>
-            <div class="dz-sub">or drag &amp; drop (JPG/PNG from GPS Map Camera)</div>
-          </div>
-        </div>
-        <div class="preview">
-          <img id="origPreview" alt="Original Preview (25%)">
-        </div>
-      </section>
+  <!-- Inline message -->
+  <div id="banner" class="banner banner--info" hidden></div>
 
-      <!-- Right: Results (cropped overlay INSIDE this card as a subsection) -->
-      <section class="card right-col">
-        <h3>Results</h3>
-        <dl class="results">
-          <div><dt>Date</dt>       <dd id="valDate">—</dd></div>
-          <div><dt>Time</dt>       <dd id="valTime">—</dd></div>
-          <div><dt>Latitude</dt>   <dd id="valLat">—</dd></div>
-          <div><dt>Longitude</dt>  <dd id="valLon">—</dd></div>
-          <div class="address-row"><dt>Address</dt> <dd id="valAddr">—</dd></div>
-          <div><dt>Ward</dt>       <dd id="valWard">—</dd></div>
-          <div><dt>Beat No.</dt>   <dd id="valBeat">—</dd></div>
-          <div><dt>Police Station</dt> <dd id="valPS">—</dd></div>
-        </dl>
+  <!-- Main -->
+  <main class="shell">
+    <!-- Left -->
+    <section class="card card--left">
+      <div class="card-title">Original Photo (25%)</div>
 
-        <div class="subsection">
-          <div class="subsection-title">Cropped Overlay (GPS text)</div>
-          <div class="preview">
-            <img id="cropPreview" alt="Cropped HUD Preview (50%)">
-          </div>
+      <!-- Drop zone -->
+      <div id="drop-zone" class="dropzone" tabindex="0" role="button" aria-label="Tap to choose image">
+        <div class="dz-inner">
+          <div class="dz-icon">📷</div>
+          <div class="dz-title">Tap to choose image</div>
+          <div class="dz-sub">or drag &amp; drop (JPG/PNG from GPS Map Camera)</div>
         </div>
-      </section>
-    </div>
+      </div>
+      <!-- Hidden file input (not covering the zone) -->
+      <input id="file" class="vh" type="file" accept="image/jpeg,image/png" />
+
+      <figure class="fig">
+        <img id="original-preview" alt="Original Preview (25%)" />
+        <figcaption>Original Preview (25%)</figcaption>
+      </figure>
+    </section>
+
+    <!-- Right -->
+    <section class="card card--right">
+      <div class="card-title">Results</div>
+      <div class="results-grid">
+        <div>Date</div>          <div id="r-date">—</div>
+        <div>Time</div>          <div id="r-time">—</div>
+        <div>Latitude</div>      <div id="r-lat">—</div>
+        <div>Longitude</div>     <div id="r-lon">—</div>
+        <div>Address</div>       <div id="r-addr">—</div>
+        <div>Ward</div>          <div id="r-ward">—</div>
+        <div>Beat No.</div>      <div id="r-beat">—</div>
+        <div>Police Station</div><div id="r-ps">—</div>
+      </div>
+
+      <div class="subsection">
+        <div class="sub-title">Cropped Overlay (GPS text)</div>
+        <figure class="fig fig--wide">
+          <img id="hud-preview" alt="Cropped HUD Preview (50%)" />
+          <figcaption>Cropped HUD Preview (50%)</figcaption>
+        </figure>
+      </div>
+    </section>
   </main>
 
-  <div class="footer-gap"></div>
-  <div class="saffron-line saffron-footer"></div>
-  <footer class="footer">
-    <div class="footer-inner">
-      <div class="footer-line">
-        <img src="data/Crescendo Logo.png" alt="" class="cres-logo" onerror="this.style.display='none'">
-        <strong>Developed by</strong> Crescendo Innovative Solutions LLP ·
-        <strong>Admin:</strong>
-        <a href="mailto:Care@crescendoits.com" class="saffron-link">Care@crescendoits.com</a>
-      </div>
-      <div class="footer-line">
-        © 2025 Municipal Corporation of Greater Mumbai (MCGM) —
-        <a href="https://www.mcgm.gov.in" target="_blank" rel="noopener">www.mcgm.gov.in</a>
-        <span class="build">| Build: v2025.08.18.Prod</span>
-      </div>
+  <!-- Footer -->
+  <footer class="app-footer">
+    <div>
+      Developed by <strong>Crescendo Innovative Solutions LLP</strong> ·
+      Admin: <a href="mailto:Care@crescendoits.com">Care@crescendoits.com</a>
+    </div>
+    <div>
+      © 2025 Municipal Corporation of Greater Mumbai (MCGM) —
+      <a href="https://www.mcgm.gov.in" target="_blank" rel="noopener">www.mcgm.gov.in</a> ·
+      Build: <span id="build">v2025.08.18.Prod.R3</span>
     </div>
   </footer>
 
-  <!-- OCR runtime -->
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+  <!-- Tesseract -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
