@@ -2,7 +2,7 @@
    Abandoned Vehicles – Marshal Upload (MCGM)
    Simplified Flow (2025-08-18)
    - Drag & drop + single picker
-   - Crop bottom HUD (left/right trim)
+   - Crop bottom HUD (left/right trim, adjusted)
    - OCR (eng/hin/mar)
    - Parsing rules: ignore line1, use line2–4 for address,
      second-last = lat/long, last = date/time
@@ -72,8 +72,6 @@ const ENTRY = {
 };
 
 // -------------------- Drag & Drop --------------------
-// Allow drag-drop or click to select an image
-
 dropArea.addEventListener('click', () => fileInput.click());
 dropArea.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
 fileInput.addEventListener('click', (e) => { e.target.value = ''; });
@@ -88,40 +86,34 @@ dropArea.addEventListener('drop', (e) => {
 
 // -------------------- Core Flow --------------------
 async function handleFile(file) {
-  // Step 1: Validate file
   if (!/^image\/(jpe?g|png)$/i.test(file.type)) {
     setBanner('Please choose a JPG or PNG.', 'error');
     return;
   }
 
-  // Reset UI outputs
   resetOutputs();
 
-  // Step 2: Upload image
   setPill('upload', 'run');
   const dataURL = await fileToDataURL(file);
   imgOriginal.src = dataURL;
   setPill('upload', 'ok');
 
-  // Step 3: Crop HUD (bottom box with GPS info)
   setPill('ocr', 'run');
   const cropURL = await cropHud(dataURL);
   imgCrop.src = cropURL;
 
-  // Step 4: Run OCR on cropped section
   let text = '';
   try {
     const worker = Tesseract.createWorker('eng+hin+mar', 1, {
-      tessedit_pageseg_mode: Tesseract.PSM.AUTO, // Better block handling
+      // PSM 6 = Assume a single uniform block of text (works well for the HUD)
+      tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK,
       logger: _ => {}
     });
     const res = await worker.recognize(cropURL);
     await worker.terminate();
     text = (res?.data?.text || '').trim();
 
-    // Debug log raw OCR output
     console.log('Raw OCR Text:', text);
-
     setPill('ocr', 'ok');
   } catch (e) {
     setPill('ocr', 'err');
@@ -129,24 +121,23 @@ async function handleFile(file) {
     return;
   }
 
-  // Step 5: Parse OCR output
   setPill('parse', 'run');
   const parsed = parseHudText(text);
-  if (!parsed.date || !parsed.time || !parsed.lat || !parsed.lon || !parsed.address) {
+  console.log('Parsed Fields:', parsed);
+
+  if (!parsed.date || !parsed.time || isNaN(parsed.lat) || isNaN(parsed.lon) || !parsed.address) {
     setPill('parse', 'err');
     setBanner('Could not parse all fields from HUD.', 'error');
     return;
   }
   setPill('parse', 'ok');
 
-  // Display parsed values
   outDate.textContent = parsed.date;
   outTime.textContent = parsed.time;
   outLat.textContent  = parsed.lat.toFixed(6);
   outLon.textContent  = parsed.lon.toFixed(6);
   outAddr.textContent = parsed.address;
 
-  // Step 6: GeoJSON lookup
   setPill('geo', 'run');
   await ensureGeo();
   const gj = geoLookup(parsed.lat, parsed.lon);
@@ -160,10 +151,8 @@ async function handleFile(file) {
   }
   setPill('geo', 'ok');
 
-  // Step 7: Review complete
   setPill('review', 'ok');
 
-  // Step 8: Build Google Form URL and redirect
   const url = new URL(FORM_BASE);
   url.searchParams.set(ENTRY.date, parsed.date);
   url.searchParams.set(ENTRY.time, parsed.time);
@@ -185,7 +174,6 @@ async function handleFile(file) {
   }
 }
 
-// Reset outputs between runs
 function resetOutputs() {
   ['upload','ocr','parse','geo','review','redirect'].forEach(k => setPill(k, null));
   [outDate,outTime,outLat,outLon,outAddr,outWard,outBeat,outPS].forEach(o => o.textContent = '—');
@@ -194,7 +182,6 @@ function resetOutputs() {
   setBanner('', 'info');
 }
 
-// Convert file to base64 data URL
 function fileToDataURL(file) {
   return new Promise((resolve, reject) => {
     const fr = new FileReader();
@@ -205,24 +192,93 @@ function fileToDataURL(file) {
 }
 
 // -------------------- Crop Bottom HUD --------------------
-// Crop bottom 30% of image, trimming 25% left and 5% right
+// Dynamically detect the dark HUD band at the bottom (no image preprocessing applied)
+// - Scan bottom 40% to locate the darkest continuous band
+// - Add safe margins so last line (date/time) is fully included
+// - Trim left to avoid Google map inset; expand if we detect strong variance (likely mini-map)
 async function cropHud(dataURL) {
   const img = await loadImage(dataURL);
   const W = img.naturalWidth, H = img.naturalHeight;
-  const sy = Math.floor(H * 0.70);   // start higher (capture more)
-  const sx = Math.floor(W * 0.25);
-  const sw = Math.floor(W * 0.70);
-  const sh = Math.floor(H * 0.30);   // increase height to 30%
 
+  // Draw full image to a tiny helper canvas to cheaply analyze luminance per row
+  const helper = document.createElement('canvas');
+  helper.width = Math.max(200, Math.floor(W * 0.2)); // downscale for speed
+  helper.height = Math.max(200, Math.floor(H * 0.2));
+  const hctx = helper.getContext('2d');
+  hctx.drawImage(img, 0, 0, helper.width, helper.height);
+
+  const imgData = hctx.getImageData(0, 0, helper.width, helper.height).data;
+  const rows = helper.height;
+  const cols = helper.width;
+
+  // Compute average luminance for each row
+  const luminance = new Array(rows).fill(0);
+  for (let y = 0; y < rows; y++) {
+    let sum = 0;
+    for (let x = 0; x < cols; x++) {
+      const i = (y * cols + x) * 4;
+      const r = imgData[i], g = imgData[i+1], b = imgData[i+2];
+      // Rec. 709 luma
+      sum += 0.2126*r + 0.7152*g + 0.0722*b;
+    }
+    luminance[y] = sum / cols;
+  }
+
+  // Search only the bottom 40% of rows for a dark band
+  const startRow = Math.floor(rows * 0.60);
+  let hudTopRow = rows - Math.floor(rows * 0.25); // fallback ≈ bottom 25%
+  let minAvg = 255;
+  for (let y = rows - 1; y >= startRow; y--) {
+    if (luminance[y] < minAvg) {
+      minAvg = luminance[y];
+      hudTopRow = y; // track darkest row seen upwards
+    }
+  }
+
+  // Map helper row back to original image Y
+  let sy = Math.max(0, Math.floor(hudTopRow / rows * H) - Math.floor(H * 0.02)); // add small margin above
+  // Clamp within [0.65H, 0.78H] to avoid accidental over-crop on bright photos
+  sy = Math.min(Math.max(sy, Math.floor(H * 0.65)), Math.floor(H * 0.78));
+
+  // Height: ensure we include full HUD (prefer 28–35% of H)
+  let sh = Math.floor(H * 0.32);
+  if (sy + sh > H) sh = H - sy; // clamp to bottom
+
+  // Left trim: default 24%, but expand to 30% if left-bottom region shows high variance (likely Google map inset)
+  let sx = Math.floor(W * 0.24);
+  const leftProbeW = Math.floor(cols * 0.18);
+  const leftProbeY0 = Math.floor(rows * 0.82);
+  let leftSum = 0, leftSum2 = 0, n = 0;
+  for (let y = leftProbeY0; y < rows; y++) {
+    for (let x = 0; x < leftProbeW; x++) {
+      const i = (y * cols + x) * 4;
+      const r = imgData[i], g = imgData[i+1], b = imgData[i+2];
+      const L = 0.2126*r + 0.7152*g + 0.0722*b;
+      leftSum += L; leftSum2 += L*L; n++;
+    }
+  }
+  const leftMean = leftSum / Math.max(1,n);
+  const leftVar = leftSum2/Math.max(1,n) - leftMean*leftMean;
+  if (leftVar > 1500) { // heuristic: busy tile -> likely mini-map
+    sx = Math.floor(W * 0.30);
+  }
+
+  // Right trim: keep tiny padding to avoid overlay watermark
+  const rightPad = Math.floor(W * 0.02);
+  const sw = W - sx - rightPad;
+
+  // Draw final crop
   const c = document.createElement('canvas');
-  c.width = sw;
-  c.height = sh;
+  c.width = sw; c.height = sh;
   const ctx = c.getContext('2d');
   ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+
+  // Debug: show chosen crop metrics
+  console.log('Crop metrics:', { sx, sy, sw, sh, W, H, leftVar: Math.round(leftVar) });
+
   return c.toDataURL('image/png');
 }
 
-// Helper: load image
 function loadImage(url) {
   return new Promise((res, rej) => {
     const im = new Image();
@@ -233,14 +289,13 @@ function loadImage(url) {
 }
 
 // -------------------- Parsing --------------------
-// Parse OCR lines into address, lat/lon, date/time
 function parseHudText(raw) {
   const lines = raw.split(/\n/).map(l => l.trim()).filter(Boolean);
   if (lines.length < 3) return {};
 
-  const last = lines[lines.length - 1]; // Date/time line
-  const prev = lines[lines.length - 2]; // Lat/lon line
-  const addrLines = lines.slice(1, lines.length - 2); // Address lines (1–3)
+  const last = lines[lines.length - 1];
+  const prev = lines[lines.length - 2];
+  const addrLines = lines.slice(1, lines.length - 2);
   const address = addrLines.join(', ');
 
   const latM = prev.match(/Lat[^0-9]*([+-]?[0-9]+\.?[0-9]*)/i);
@@ -260,7 +315,6 @@ function parseHudText(raw) {
 // -------------------- GeoJSON --------------------
 let gjW = null, gjB = null, gjP = null;
 
-// Load all geojson files
 async function ensureGeo() {
   if (gjW && gjB && gjP) return;
   const [w, b, p] = await Promise.all([
@@ -271,7 +325,6 @@ async function ensureGeo() {
   gjW = w; gjB = b; gjP = p;
 }
 
-// Lookup ward, beat, police station
 function geoLookup(lat, lon) {
   const out = { ward: '', beat: '', ps: '' };
   if (!gjW || !gjB || !gjP) return out;
@@ -290,7 +343,6 @@ function geoLookup(lat, lon) {
   return out;
 }
 
-// Point-in-polygon check
 function pointInPoly(poly, pt) {
   const [x, y] = pt;
   let inside = false;
@@ -306,7 +358,6 @@ function pointInPoly(poly, pt) {
 }
 
 // -------------------- Manual Redirect --------------------
-// If auto redirect fails, show a button for manual opening
 function addManualRedirect(url) {
   let btn = el('manualRedirect');
   if (!btn) {
