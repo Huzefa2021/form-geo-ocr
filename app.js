@@ -1,7 +1,6 @@
-/* app.js — MCGM Marshal Upload (OCR + GeoJSON + Google Form)
-   Build: v2025.08.18.Prod (UI rev: pills-only, times in brackets, overlay below results)
+/* app.js — MCGM Marshal Upload
+   Build: v2025.08.18.Prod (pills sticky, cropped overlay inside Results)
 */
-
 const CFG = {
   previews: { originalScale: 0.25, cropScale: 0.50 },
   cropHUD: { topFromBottomPct: 0.28, leftTrimPct: 0.18, rightTrimPct: 0.02 },
@@ -10,12 +9,12 @@ const CFG = {
     wards: "data/wards.geojson",
     beats: "data/beats.geojson",
     police: "data/police_jurisdiction.geojson",
-    bounds: { lat: [18.0, 20.0], lon: [72.0, 73.5] } // Mumbai sanity window
+    bounds: { lat: [18.0, 20.0], lon: [72.0, 73.5] }
   },
   outsideMsg: "Outside MCGM Boundaries — Not allowed.",
   GOOGLE_FORM: {
     enabled: true,
-    mode: "open", // "redirect" to stay in same tab
+    mode: "open",
     action: "https://docs.google.com/forms/d/e/1FAIpQLSeo-xlOSxvG0IwtO5MkKaTJZNJkgTsmgZUw-FBsntFlNdRnCw/viewform",
     fields: {
       date:      "entry.1911996449",
@@ -30,62 +29,41 @@ const CFG = {
   }
 };
 
-const state = {
-  img: null, crop: null, text: "",
-  parsed: null, loc: null, polygons: null, timers: {}
-};
-
-const $  = (s)=>document.querySelector(s);
+const state = { img:null, crop:null, text:"", parsed:null, loc:null, polygons:null, timers:{} };
+const $ = s => document.querySelector(s);
 const setText = (sel,val)=>{ const el=$(sel); if(el) el.textContent = (val ?? "—"); };
 
 const pillIds = ["#stage-upload","#stage-ocr","#stage-parse","#stage-geojson","#stage-review","#stage-redirect"];
-function markStage(i, cls){
-  const el = $(pillIds[i]); if(!el) return;
-  el.classList.remove("ok","active","pending","err"); el.classList.add(cls);
-}
+function markStage(i,cls){ const el=$(pillIds[i]); if(!el) return; el.classList.remove("ok","active","pending","err"); el.classList.add(cls); }
 
-/* ------------ timing to pill (in brackets) ------------ */
-function startTimer(name){ state.timers[name] = performance.now(); }
-function endTimer(name){
-  const t0 = state.timers[name]; if(!t0) return;
-  const dt = (performance.now()-t0)/1000;
-  const t = document.querySelector(`.pill-time[data-time="${name}"]`);
-  if (t) t.textContent = `(${dt.toFixed(1)}s)`;
-}
+function startTimer(name){ state.timers[name]=performance.now(); }
+function endTimer(name){ const t0=state.timers[name]; if(!t0) return; const dt=(performance.now()-t0)/1000;
+  const el=document.querySelector(`.pill-time[data-time="${name}"]`); if(el) el.textContent=`(${dt.toFixed(1)}s)`; }
 
-/* ------------ upload & DnD ------------ */
-const fileInput = $("#fileInput"), dropzone = $("#dropzone");
-const origImgEl = $("#origPreview"), cropImgEl = $("#cropPreview");
+const fileInput=$("#fileInput"), dropzone=$("#dropzone");
+const origImgEl=$("#origPreview"), cropImgEl=$("#cropPreview");
 
 function setupDnD(){
   ["dragenter","dragover"].forEach(ev=>{
-    dropzone.addEventListener(ev, e=>{ e.preventDefault(); dropzone.classList.add("dragging"); });
+    dropzone.addEventListener(ev,e=>{e.preventDefault(); dropzone.classList.add("dragging");});
   });
   ["dragleave","drop"].forEach(ev=>{
-    dropzone.addEventListener(ev, e=>{ e.preventDefault(); dropzone.classList.remove("dragging"); });
+    dropzone.addEventListener(ev,e=>{e.preventDefault(); dropzone.classList.remove("dragging");});
   });
   dropzone.addEventListener("drop", e=>{
     const f=e.dataTransfer?.files?.[0]; if(f) handleFile(f);
   });
-  dropzone.addEventListener("click", ()=> fileInput?.click());
+  dropzone.addEventListener("click", ()=>fileInput?.click());
   fileInput?.addEventListener("change", e=>{
     const f=e.target.files?.[0]; if(f) handleFile(f);
-    // allow re-pick same file
-    e.target.value = "";
+    e.target.value="";
   });
 }
 
-function readAsDataURL(file){
-  return new Promise((res,rej)=>{
-    const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(file);
-  });
-}
+function readAsDataURL(file){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(file); }); }
 function drawScaled(img,scale){
-  const c=document.createElement("canvas");
-  c.width=Math.max(1,Math.round(img.naturalWidth*scale));
-  c.height=Math.max(1,Math.round(img.naturalHeight*scale));
-  const g=c.getContext("2d"); g.imageSmoothingEnabled=true; g.drawImage(img,0,0,c.width,c.height);
-  return c.toDataURL("image/jpeg",0.9);
+  const c=document.createElement("canvas"); c.width=Math.max(1,Math.round(img.naturalWidth*scale)); c.height=Math.max(1,Math.round(img.naturalHeight*scale));
+  c.getContext("2d").drawImage(img,0,0,c.width,c.height); return c.toDataURL("image/jpeg",0.9);
 }
 function cropHUD(img){
   const {topFromBottomPct,leftTrimPct,rightTrimPct}=CFG.cropHUD;
@@ -100,16 +78,16 @@ function cropHUD(img){
   return c.toDataURL("image/jpeg",0.95);
 }
 
-/* ------------ OCR ------------ */
+/* OCR */
 async function runOCR(dataURL, lang){
   markStage(1,"active"); startTimer("OCR");
-  if(!window.Tesseract||!Tesseract.recognize){ markStage(1,"err"); endTimer("OCR"); throw new Error("Tesseract.js missing"); }
+  if(!window.Tesseract||!Tesseract.recognize){ markStage(1,"err"); endTimer("OCR"); throw new Error("Tesseract missing"); }
   const {data}=await Tesseract.recognize(dataURL, lang||CFG.ocr.primaryLang);
   endTimer("OCR"); markStage(1,"ok");
   return data?.text||"";
 }
 
-/* ------------ parsing ------------ */
+/* Parse */
 const RE={
   date:/\b(0?[1-9]|[12][0-9]|3[01])[-\/. ](0?[1-9]|1[0-2])[-\/. ](20\d{2})\b/,
   time:/\b([01]?\d|2[0-3]):([0-5]\d)(?:\s?([AP]M))?\b/i,
@@ -117,12 +95,12 @@ const RE={
   lonLine:/lon[^0-9\-]*([\-]?\d{1,3}[.,]\d{3,8})/i,
   dec:/([\-]?\d{1,3}[.,]\d{3,8})/g
 };
-const normNum = s => (s==null) ? null : Number(String(s).replace(/[^\d\.\-]/g,"").replace(",","."));
+const normNum = s => (s==null)?null:Number(String(s).replace(/[^\d\.\-]/g,"").replace(",","."));
 function clamp(n,lo,hi){return Math.min(hi,Math.max(lo,n));}
 
 function parseDateTime(text){
   let date=null,time=null;
-  const dm=RE.date.exec(text); if(dm){ const dd=dm[1].padStart(2,"0"), mm=dm[2].padStart(2,"0"), yyyy=dm[3]; date=`${yyyy}-${mm}-${dd}`; }
+  const dm=RE.date.exec(text); if(dm){ const dd=dm[1].padStart(2,"0"),mm=dm[2].padStart(2,"0"),yyyy=dm[3]; date=`${yyyy}-${mm}-${dd}`; }
   const tm=RE.time.exec(text); if(tm){ let hh=parseInt(tm[1],10), mm=tm[2], ap=(tm[3]||"").toUpperCase(); if(ap==="PM"&&hh<12)hh+=12; if(ap==="AM"&&hh===12)hh=0; time=`${String(hh).padStart(2,"0")}:${mm}`; }
   return {date,time};
 }
@@ -159,7 +137,7 @@ function parseOCR(text){
   return {date,time,lat,lon,addr};
 }
 
-/* ------------ GeoJSON (point-in-polygon) ------------ */
+/* GeoJSON */
 async function loadGeoJSON(url){ const r=await fetch(url,{cache:"no-store"}); if(!r.ok) throw new Error("load "+url); return r.json(); }
 function bboxScanner(){ let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity; return {
   scan(arr){ for(const p of arr){ const [x,y]=p; if(x<minX)minX=x; if(y<minY)minY=y; if(x>maxX)maxX=x; if(y>maxY)maxY=y; } },
@@ -194,7 +172,7 @@ function resolvePoint(lat,lon,idx){
   return res;
 }
 
-/* ------------ Google Form ------------ */
+/* Google Form */
 function tryOpenGoogleForm(parsed,loc){
   const cfg=CFG.GOOGLE_FORM; if(!cfg.enabled) return;
   if(!parsed?.date||!parsed?.time||parsed?.lat==null||parsed?.lon==null||!parsed?.addr||!loc?.ward||!loc?.beat||!loc?.ps||!loc.inside) return;
@@ -208,7 +186,7 @@ function tryOpenGoogleForm(parsed,loc){
   markStage(5,"ok");
 }
 
-/* ------------ render helpers ------------ */
+/* render */
 function renderParsed(p){
   setText("#valDate",p?.date||"—");
   setText("#valTime",p?.time||"—");
@@ -222,7 +200,7 @@ function renderLoc(l){
   setText("#valPS",l?.ps||"—");
 }
 
-/* ------------ pipeline ------------ */
+/* pipeline */
 async function handleFile(file){
   [0,1,2,3,4,5].forEach(i=>markStage(i,"pending"));
   markStage(0,"active"); startTimer("Upload");
@@ -236,7 +214,7 @@ async function handleFile(file){
 
     const cropURL=cropHUD(img); state.crop=cropURL; cropImgEl.src=cropURL;
 
-    // OCR
+    // OCR (with optional rerun for Hindi/Marathi)
     let text=await runOCR(cropURL,CFG.ocr.primaryLang);
     if(CFG.ocr.rerunOnDevanagari && /[\u0900-\u097F]/.test(text)){
       try{ const hin=await runOCR(cropURL,CFG.ocr.secondaryLang); if(hin && hin.length>text.length*0.7) text+="\n"+hin; }catch(_){}
@@ -244,28 +222,28 @@ async function handleFile(file){
     state.text=text;
 
     // Parse
-    markStage(2,"active");
     const parsed=parseOCR(text);
     const within=CFG.geojson.bounds;
     if(parsed.lat!=null && !(parsed.lat>=within.lat[0]&&parsed.lat<=within.lat[1])) parsed.lat=null;
     if(parsed.lon!=null && !(parsed.lon>=within.lon[0]&&parsed.lon<=within.lon[1])) parsed.lon=null;
     state.parsed=parsed; renderParsed(parsed);
 
-    // Load polygons once
+    // Polygons (lazy load once)
     if(!state.polygons){
-      const [gw,gb,gp]=await Promise.all([loadGeoJSON(CFG.geojson.wards),loadGeoJSON(CFG.geojson.beats),loadGeoJSON(CFG.geojson.police)]);
+      const [gw,gb,gp]=await Promise.all([
+        loadGeoJSON(CFG.geojson.wards),
+        loadGeoJSON(CFG.geojson.beats),
+        loadGeoJSON(CFG.geojson.police)
+      ]);
       state.polygons={ wards:buildIndex(gw), beats:buildIndex(gb), police:buildIndex(gp) };
     }
 
-    // Resolve
     let loc={ward:"—",beat:"—",ps:"—",inside:false};
     if(parsed.lat!=null && parsed.lon!=null) loc=resolvePoint(parsed.lat,parsed.lon,state.polygons);
     else markStage(3,"err");
-
     state.loc=loc; renderLoc(loc); markStage(4,"ok");
     if(!loc.inside){ alert(CFG.outsideMsg); markStage(5,"err"); return; }
 
-    // Redirect when everything valid
     if(parsed.date && parsed.time && parsed.lat!=null && parsed.lon!=null && parsed.addr && loc.ward && loc.beat && loc.ps){
       tryOpenGoogleForm({
         date:parsed.date, time:parsed.time,
@@ -275,7 +253,6 @@ async function handleFile(file){
     }else{
       markStage(5,"pending");
     }
-
   }catch(err){
     console.error(err);
     alert("Failed to process image. Please try again with a clearer GPS Map Camera photo.");
@@ -283,14 +260,12 @@ async function handleFile(file){
   }
 }
 
-/* ------------ boot ------------ */
+/* boot */
 window.addEventListener("DOMContentLoaded",()=>{
   setupDnD();
   [0,1,2,3,4,5].forEach(i=>markStage(i,"pending"));
-  // init pill times to 0.0s
   ["Upload","OCR","Parse","GeoJSON","Review","Redirect"].forEach(n=>{
-    const el=document.querySelector(`.pill-time[data-time="${n}"]`);
-    if(el) el.textContent="(0.0s)";
+    const el=document.querySelector(`.pill-time[data-time="${n}"]`); if(el) el.textContent="(0.0s)";
   });
   const reset=$('[data-action="reset"]'); reset?.addEventListener("click",()=>window.location.reload());
 });
