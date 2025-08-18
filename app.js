@@ -111,10 +111,17 @@ async function handleFile(file) {
   // Step 4: Run OCR on cropped section
   let text = '';
   try {
-    const worker = Tesseract.createWorker('eng+hin+mar', 1, { logger: _ => {} });
+    const worker = Tesseract.createWorker('eng+hin+mar', 1, {
+      tessedit_pageseg_mode: Tesseract.PSM.AUTO, // Better block handling
+      logger: _ => {}
+    });
     const res = await worker.recognize(cropURL);
     await worker.terminate();
     text = (res?.data?.text || '').trim();
+
+    // Debug log raw OCR output
+    console.log('Raw OCR Text:', text);
+
     setPill('ocr', 'ok');
   } catch (e) {
     setPill('ocr', 'err');
@@ -198,14 +205,14 @@ function fileToDataURL(file) {
 }
 
 // -------------------- Crop Bottom HUD --------------------
-// Crop bottom 27% of image, trimming 25% left and 5% right
+// Crop bottom 30% of image, trimming 25% left and 5% right
 async function cropHud(dataURL) {
   const img = await loadImage(dataURL);
   const W = img.naturalWidth, H = img.naturalHeight;
-  const sy = Math.floor(H * 0.73);
+  const sy = Math.floor(H * 0.70);   // start higher (capture more)
   const sx = Math.floor(W * 0.25);
   const sw = Math.floor(W * 0.70);
-  const sh = Math.floor(H * 0.27);
+  const sh = Math.floor(H * 0.30);   // increase height to 30%
 
   const c = document.createElement('canvas');
   c.width = sw;
