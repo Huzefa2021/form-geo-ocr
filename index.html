@@ -10,24 +10,30 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <!-- HEADER (no pills here) -->
+  <!-- HEADER (single row: brand left, actions right) -->
   <header class="topbar">
-    <div class="brand">
-      <img class="logo" src="https://www.mcgm.gov.in/com.mcgm.newframework/images/logo_V1.png" alt="MCGM Logo">
-      <div class="titles">
-        <div class="title">Municipal Corporation of Greater Mumbai</div>
-        <div class="subtitle">Abandoned Vehicles – Identification &amp; Pre-Notice (Marshal Upload)</div>
+    <div class="topbar-row">
+      <div class="brand">
+        <img class="logo" src="https://www.mcgm.gov.in/com.mcgm.newframework/images/logo_V1.png" alt="MCGM Logo">
+        <div class="titles">
+          <div class="title">Municipal Corporation of Greater Mumbai</div>
+          <div class="subtitle">Abandoned Vehicles – Identification &amp; Pre-Notice (Marshal Upload)</div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <div class="cdn-badge">CDN: v5 (jsDelivr)</div>
+        <button class="btn reset" data-action="reset" type="button" title="Reset all">Reset</button>
+        <!-- Example “Cancel” button if/when you need it somewhere -->
+        <!-- <button class="btn cancel" type="button">Cancel</button> -->
       </div>
     </div>
-    <div class="actions">
-      <button class="btn reset" data-action="reset" type="button">Reset</button>
-      <div class="cdn-badge">CDN: v5 (jsDelivr)</div>
-    </div>
+
     <div class="saffron-line"></div>
   </header>
 
-  <!-- STAGE PILLS (with times in brackets) -->
-  <section class="stages">
+  <!-- STAGE PILLS (sticky under the header; with timings in brackets) -->
+  <section class="stages stages-sticky">
     <span class="stage-pill pending" id="stage-upload"><span class="icon">⬆️</span>Upload <span class="pill-time" data-time="Upload">(0.0s)</span></span>
     <span class="stage-pill pending" id="stage-ocr"><span class="icon">🔎</span>OCR <span class="pill-time" data-time="OCR">(0.0s)</span></span>
     <span class="stage-pill pending" id="stage-parse"><span class="icon">🧩</span>Parse <span class="pill-time" data-time="Parse">(0.0s)</span></span>
@@ -38,7 +44,7 @@
 
   <main class="container">
     <div class="grid">
-      <!-- Left Column: Upload -->
+      <!-- Left: Upload -->
       <section class="card left-col">
         <h3>Original Photo (25%)</h3>
         <div id="dropzone" class="dropzone" title="Drop an image or click to choose">
@@ -54,7 +60,7 @@
         </div>
       </section>
 
-      <!-- Right Column: Results -->
+      <!-- Right: Results (cropped overlay INSIDE this card as a subsection) -->
       <section class="card right-col">
         <h3>Results</h3>
         <dl class="results">
@@ -67,13 +73,12 @@
           <div><dt>Beat No.</dt>   <dd id="valBeat">—</dd></div>
           <div><dt>Police Station</dt> <dd id="valPS">—</dd></div>
         </dl>
-      </section>
 
-      <!-- Right Column: Cropped Overlay BELOW Results -->
-      <section class="card right-col">
-        <h3>Cropped Overlay (GPS text)</h3>
-        <div class="preview">
-          <img id="cropPreview" alt="Cropped HUD Preview (50%)">
+        <div class="subsection">
+          <div class="subsection-title">Cropped Overlay (GPS text)</div>
+          <div class="preview">
+            <img id="cropPreview" alt="Cropped HUD Preview (50%)">
+          </div>
         </div>
       </section>
     </div>
