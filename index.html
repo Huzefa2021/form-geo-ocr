@@ -3,101 +3,105 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>MCGM | Abandoned Vehicles — Marshal Upload</title>
-  <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+  <title>Municipal Corporation of Greater Mumbai — Abandoned Vehicles (Marshal Upload)</title>
   <link rel="stylesheet" href="styles.css" />
+  <!-- Tesseract (latest stable) -->
+  <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <!-- Icons -->
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 </head>
 <body>
+
   <!-- Header -->
   <header class="app-header">
-    <div class="header-left">
-      <img src="https://www.mcgm.gov.in/com.mcgm.newframework/images/logo_V1.png" alt="MCGM" class="logo">
-      <div class="header-title">
-        <div class="title-main">Municipal Corporation of Greater Mumbai</div>
-        <div class="title-sub">Abandoned Vehicles – Identification &amp; Pre-Notice (Marshal Upload)</div>
+    <div class="hdr-left">
+      <img class="mcgm-logo" src="https://www.mcgm.gov.in/com.mcgm.newframework/images/logo_V1.png" alt="MCGM" />
+      <div class="hdr-title">
+        <div class="t1">Municipal Corporation of Greater Mumbai</div>
+        <div class="t2">Abandoned Vehicles — Identification &amp; Pre-Notice (Marshal Upload)</div>
       </div>
     </div>
-    <div class="header-right">
-      <span class="cdn-pill" id="cdn-pill">CDN: v5 (jsDelivr)</span>
-      <button id="btn-reset" class="btn btn--danger">Reset</button>
+    <div class="hdr-right">
+      <span id="cdnBadge" class="badge badge-info">CDN: v5 (jsDelivr)</span>
+      <button id="btnReset" class="btn btn-danger">Reset</button>
     </div>
   </header>
 
-  <!-- Pills -->
-  <nav class="pillbar">
-    <div class="pill pill--idle" data-pill="upload"><span class="pill__dot"></span> Upload <span class="pill__time"></span></div>
-    <div class="pill pill--idle" data-pill="ocr"><span class="pill__dot"></span> OCR <span class="pill__time"></span></div>
-    <div class="pill pill--idle" data-pill="parse"><span class="pill__dot"></span> Parse <span class="pill__time"></span></div>
-    <div class="pill pill--idle" data-pill="geo"><span class="pill__dot"></span> GeoJSON <span class="pill__time"></span></div>
-    <div class="pill pill--idle" data-pill="review"><span class="pill__dot"></span> Review <span class="pill__time"></span></div>
-    <div class="pill pill--idle" data-pill="redirect"><span class="pill__dot"></span> Redirect <span class="pill__time"></span></div>
-  </nav>
+  <!-- Sticky pill bar -->
+  <section id="pillBar" class="pillbar">
+    <button class="pill" id="pill-upload"><span>Upload</span><em>(0.0s)</em></button>
+    <button class="pill" id="pill-ocr"><span>OCR</span><em>(0.0s)</em></button>
+    <button class="pill" id="pill-parse"><span>Parse</span><em>(0.0s)</em></button>
+    <button class="pill" id="pill-geo"><span>GeoJSON</span><em>(0.0s)</em></button>
+    <button class="pill" id="pill-review"><span>Review</span><em>(0.0s)</em></button>
+    <button class="pill" id="pill-redirect"><span>Redirect</span><em>(0.0s)</em></button>
+  </section>
 
-  <!-- Inline message -->
-  <div id="banner" class="banner banner--info" hidden></div>
+  <!-- Inline banner -->
+  <div id="banner" class="banner" hidden></div>
 
-  <!-- Main -->
-  <main class="shell">
-    <!-- Left -->
-    <section class="card card--left">
-      <div class="card-title">Original Photo (25%)</div>
+  <!-- Content -->
+  <main class="container">
+    <div class="grid">
+      <!-- Upload column -->
+      <section class="card">
+        <h3>Original Photo (25%)</h3>
 
-      <!-- Drop zone -->
-      <div id="drop-zone" class="dropzone" tabindex="0" role="button" aria-label="Tap to choose image">
-        <div class="dz-inner">
-          <div class="dz-icon">📷</div>
-          <div class="dz-title">Tap to choose image</div>
-          <div class="dz-sub">or drag &amp; drop (JPG/PNG from GPS Map Camera)</div>
+        <div id="dropArea" class="droparea" tabindex="0" role="button" aria-label="Tap or drop to choose image">
+          <div class="drop-invite">
+            <div class="cam-emoji">📷</div>
+            <div class="txt-1">Tap to choose image</div>
+            <div class="txt-2">or drag &amp; drop (JPG/PNG from GPS Map Camera)</div>
+          </div>
+          <input id="fileInput" type="file" accept="image/jpeg,image/png" class="hidden-input" />
         </div>
-      </div>
-      <!-- Hidden file input (not covering the zone) -->
-      <input id="file" class="vh" type="file" accept="image/jpeg,image/png" />
 
-      <figure class="fig">
-        <img id="original-preview" alt="Original Preview (25%)" />
-        <figcaption>Original Preview (25%)</figcaption>
-      </figure>
-    </section>
-
-    <!-- Right -->
-    <section class="card card--right">
-      <div class="card-title">Results</div>
-      <div class="results-grid">
-        <div>Date</div>          <div id="r-date">—</div>
-        <div>Time</div>          <div id="r-time">—</div>
-        <div>Latitude</div>      <div id="r-lat">—</div>
-        <div>Longitude</div>     <div id="r-lon">—</div>
-        <div>Address</div>       <div id="r-addr">—</div>
-        <div>Ward</div>          <div id="r-ward">—</div>
-        <div>Beat No.</div>      <div id="r-beat">—</div>
-        <div>Police Station</div><div id="r-ps">—</div>
-      </div>
-
-      <div class="subsection">
-        <div class="sub-title">Cropped Overlay (GPS text)</div>
-        <figure class="fig fig--wide">
-          <img id="hud-preview" alt="Cropped HUD Preview (50%)" />
-          <figcaption>Cropped HUD Preview (50%)</figcaption>
+        <figure class="preview-row">
+          <figcaption>Original Preview (25%)</figcaption>
+          <img id="imgOriginal" class="preview-25" alt="Original Preview (25%)" />
         </figure>
-      </div>
-    </section>
+      </section>
+
+      <!-- Results column -->
+      <section class="card">
+        <h3>Results</h3>
+        <div class="results">
+          <dl>
+            <dt>Date</dt><dd id="resDate">—</dd>
+            <dt>Time</dt><dd id="resTime">—</dd>
+            <dt>Latitude</dt><dd id="resLat">—</dd>
+            <dt>Longitude</dt><dd id="resLon">—</dd>
+            <dt>Address</dt><dd id="resAddr">—</dd>
+            <dt>Ward</dt><dd id="resWard">—</dd>
+            <dt>Beat No.</dt><dd id="resBeat">—</dd>
+            <dt>Police Station</dt><dd id="resPS">—</dd>
+          </dl>
+        </div>
+
+        <div class="subsection">
+          <h4>Cropped Overlay (GPS text)</h4>
+          <figure class="preview-row">
+            <figcaption>Cropped HUD Preview (50%)</figcaption>
+            <img id="imgCrop" class="preview-50" alt="Cropped HUD Preview (50%)" />
+          </figure>
+        </div>
+      </section>
+    </div>
   </main>
 
   <!-- Footer -->
   <footer class="app-footer">
-    <div>
+    <div class="f1">
       Developed by <strong>Crescendo Innovative Solutions LLP</strong> ·
       Admin: <a href="mailto:Care@crescendoits.com">Care@crescendoits.com</a>
     </div>
-    <div>
-      © 2025 Municipal Corporation of Greater Mumbai (MCGM) —
-      <a href="https://www.mcgm.gov.in" target="_blank" rel="noopener">www.mcgm.gov.in</a> ·
-      Build: <span id="build">v2025.08.18.Prod.R3</span>
+    <div class="f2">
+      © 2025 Municipal Corporation of Greater Mumbai (MCGM) — <a href="https://www.mcgm.gov.in" target="_blank" rel="noreferrer">www.mcgm.gov.in</a> ·
+      <span id="buildId">Build: v2025.08.18.Prod</span>
     </div>
   </footer>
 
-  <!-- Tesseract -->
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <script src="app.js"></script>
+  <script defer src="app.js"></script>
 </body>
 </html>
