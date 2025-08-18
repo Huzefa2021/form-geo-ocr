@@ -1,13 +1,12 @@
 /* -----------------------------------------------------------
    MCGM | Abandoned Vehicles — Marshal Upload
-   Robust client OCR pipeline + stable DnD/click binding
-   v2025.08.18.R3
+   v2025.08.18.R3 — Fixed DnD/click, robust OCR & parsing
 ------------------------------------------------------------*/
 (() => {
-  if (window.__mcgm_bound) return; // prevent double binding in hot reloads
+  if (window.__mcgm_bound) return; // guard
   window.__mcgm_bound = true;
 
-  // ---------- SHORTHANDS ----------
+  // ---------- helpers ----------
   const $ = s => document.querySelector(s);
   const el = {
     file: $('#file'),
@@ -29,27 +28,24 @@
     review: $('[data-pill="review"]'),
     redirect: $('[data-pill="redirect"]')
   };
-
-  // ---------- PILL HELPERS ----------
   const t0 = {};
-  function pill(name, state, t) {
-    const p = pills[name]; if (!p) return;
+  const pill = (n, state, t) => {
+    const p = pills[n]; if (!p) return;
     p.classList.remove('pill--ok','pill--err','pill--pending');
     p.classList.add(`pill--${state}`);
     const tt = p.querySelector('.pill__time'); if (tt) tt.textContent = t ? `(${t})` : '';
-  }
-  function start(name){ t0[name] = performance.now(); pill(name,'pending'); }
-  function ok(name){ pill(name,'ok', fmtTime(name)); }
-  function err(name){ pill(name,'err', fmtTime(name)); }
-  function fmtTime(name){ const ms = (performance.now() - (t0[name]||performance.now())); return (ms/1000).toFixed(1)+'s';}
+  };
+  const start = n => { t0[n]=performance.now(); pill(n,'pending'); };
+  const ok    = n => pill(n,'ok',    ((performance.now()-t0[n])/1000).toFixed(1)+'s');
+  const err   = n => pill(n,'err',   ((performance.now()-t0[n])/1000).toFixed(1)+'s');
 
-  function setBanner(msg, kind='info'){
+  const setBanner = (msg, kind='info') => {
     el.banner.textContent = msg;
     el.banner.className = `banner banner--${kind}`;
     el.banner.hidden = !msg;
-  }
+  };
 
-  // ---------- CONFIG ----------
+  // ---------- config ----------
   const CFG = {
     FIXED_BOTTOM_RATIO: 0.26,
     WIDE_BOTTOM_RATIO: 0.34,
@@ -66,13 +62,13 @@
     AUTO_REDIRECT: true
   };
 
-  // ---------- FILE + DND BINDINGS ----------
-  // Allow dropping anywhere on page without browser navigating
+  // ---------- DnD + file chooser ----------
+  // prevent default page navigation on drop
   ['dragenter','dragover','dragleave','drop'].forEach(ev => {
+    window.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); }, false);
     document.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); }, false);
   });
 
-  // Drop zone visuals + behavior
   el.drop.addEventListener('dragenter', () => el.drop.classList.add('dz--over'));
   el.drop.addEventListener('dragover',  () => el.drop.classList.add('dz--over'));
   el.drop.addEventListener('dragleave', () => el.drop.classList.remove('dz--over'));
@@ -82,33 +78,25 @@
     if (f) await process(f);
   });
 
-  // Single click opens chooser (no double chooser)
+  // single-click opens file input
   el.drop.addEventListener('click', () => el.file.click());
   el.file.addEventListener('change', async e => {
     const f = e.target.files?.[0];
     if (f) await process(f);
-    el.file.value = ''; // clear to avoid "same file" not firing
+    el.file.value = ''; // clear to reselect same file
   });
 
   // Reset
   el.btnReset.addEventListener('click', () => {
-    resetUI();
-    setBanner('Cleared.', 'info');
+    resetUI(); setBanner('Cleared.', 'info');
   });
 
-  // ---------- IMAGE LOADING ----------
-  function readAsDataURL(file){
-    return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=rej; fr.readAsDataURL(file);});
-  }
-  function loadImage(src){
-    return new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=src; });
-  }
-  function drawCrop(img,x,y,w,h){
-    const c=document.createElement('canvas'); c.width=w; c.height=h;
-    c.getContext('2d').drawImage(img,x,y,w,h,0,0,w,h); return c;
-  }
+  // ---------- IO helpers ----------
+  const readAsDataURL = file => new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=rej; fr.readAsDataURL(file);});
+  const loadImage = src => new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=src; });
+  const drawCrop = (img,x,y,w,h) => { const c=document.createElement('canvas'); c.width=w; c.height=h; c.getContext('2d').drawImage(img,x,y,w,h,0,0,w,h); return c; };
 
-  // ---------- SMART CROPS ----------
+  // ---------- smart crops ----------
   function smartHudBand(img){
     const H=img.height, W=img.width;
     const full = drawCrop(img,0,0,W,H); const ctx=full.getContext('2d');
@@ -127,7 +115,7 @@
         if(!best || s>best.score) best={y,h:bh,score:s};
       }
     }
-    return best;
+    return best && {x:0,y:best.y,w:W,h:best.h};
   }
   function scoreBand(pix,W,H,top,bh){
     let dark=0,tot=0;
@@ -141,18 +129,14 @@
     }
     return dark/Math.max(1,tot);
   }
-  function fixedBand(img,ratio){
-    const H=img.height, W=img.width;
-    const bh=Math.max(Math.floor(H*ratio), CFG.MIN_HUD_HEIGHT_PX);
-    return {y:H-bh,h:bh,w:W,x:0};
-  }
+  function fixedBand(img,ratio){ const H=img.height,W=img.width; const bh=Math.max(Math.floor(H*ratio), CFG.MIN_HUD_HEIGHT_PX); return {x:0,y:H-bh,w:W,h:bh}; }
   function candidates(img){
     const c=[], W=img.width;
-    const s=smartHudBand(img); if(s) c.push({x:0,y:s.y,w:W,h:s.h,tag:'smart'});
-    const f=fixedBand(img, CFG.FIXED_BOTTOM_RATIO); c.push({...f,tag:'fixed'});
-    const w=fixedBand(img, CFG.WIDE_BOTTOM_RATIO);  c.push({...w,tag:'wide'});
-    // add left-trim variants
-    return c.flatMap(o => [o, {...o, x:Math.floor(W*CFG.LEFT_TRIM_RATIO), w: o.w - Math.floor(W*CFG.LEFT_TRIM_RATIO), tag:o.tag+'+trim'}]);
+    const s=smartHudBand(img); if(s) c.push({...s, tag:'smart'});
+    const f=fixedBand(img, CFG.FIXED_BOTTOM_RATIO); c.push({...f, tag:'fixed'});
+    const w=fixedBand(img, CFG.WIDE_BOTTOM_RATIO);  c.push({...w, tag:'wide'});
+    // left-trim versions (to avoid map + logo area)
+    return c.flatMap(o => [o, {...o, x:Math.floor(W*CFG.LEFT_TRIM_RATIO), w:o.w - Math.floor(W*CFG.LEFT_TRIM_RATIO), tag:o.tag+'+trim'}]);
   }
 
   // ---------- OCR ----------
@@ -160,9 +144,9 @@
   function worker(){
     if (workerPromise) return workerPromise;
     start('ocr');
-    workerPromise = Tesseract.createWorker({ logger: ()=>{} })
+    workerPromise = Tesseract.createWorker({ logger:()=>{} })
       .then(async w => { await w.loadLanguage(CFG.OCR_LANG); await w.initialize(CFG.OCR_LANG); ok('ocr'); return w; })
-      .catch(e => { err('ocr'); setBanner('Failed to initialize OCR. Check CDN/network.', 'error'); throw e; });
+      .catch(e => { err('ocr'); setBanner('Failed to initialize OCR (check network/CDN).', 'error'); throw e; });
     return workerPromise;
   }
   async function ocr(canvas){
@@ -171,30 +155,32 @@
     return text || '';
   }
 
-  // ---------- PARSE ----------
+  // ---------- Parse ----------
   const norm = s => s.replace(/\u00B0/g,'°').replace(/\u00A0/g,' ').replace(/[“”]/g,'"').replace(/[’‘]/g,"'").replace(/[—–]/g,'-').trim();
   const plausible = (v,[lo,hi]) => Number.isFinite(+v) && +v>=lo && +v<=hi;
 
   function parseHUD(raw){
     const lines = norm(raw).split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
     const out = {date:'', time:'', lat:'', lon:'', address:''};
-    if (!lines.length) return out;
+    if(!lines.length) return out;
 
-    let i=1; // skip first line (city/country)
+    // Line1 is always city/country — ignore
+    let i=1;
     const addr=[];
     for(; i<lines.length; i++){
       const L=lines[i];
       if (/^lat/i.test(L) || /^lon/i.test(L) || /GMT/i.test(L) || /\d{1,2}\s*:\s*\d{2}/i.test(L)) break;
-      addr.push(L); if (addr.length>=2) { i++; break; } // keep at most 2 lines
+      addr.push(L);
+      if (addr.length>=2){ i++; break; } // keep at most 2 lines of address
     }
 
     const tail = lines.slice(i).join(' • ');
-    // lat/lon labeled
+    // labeled lat/lon
     const mLat = tail.match(/lat(?:itude)?[:\s]*([+-]?\d{1,2}\.\d{3,7})/i);
     const mLon = tail.match(/lon(?:g(?:itude)?)?[:\s]*([+-]?\d{1,3}\.\d{3,7})/i);
     let lat = mLat?.[1]||'', lon = mLon?.[1]||'';
 
-    // unlabeled floats fallback
+    // unlabeled fallback
     if (!lat || !lon) {
       const floats = tail.match(/[-+]?\d{1,3}\.\d{3,7}/g) || [];
       for(let a=0;a<floats.length;a++){
@@ -209,12 +195,10 @@
       }
     }
 
-    // time/date from last line
+    // date & time from last line or tail
     const last = lines[lines.length-1];
     let m = last.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\s+(\d{1,2}:\d{2}\s*[AP]M)/i);
-    if(!m){
-      m = tail.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}).*?(\d{1,2}:\d{2}\s*[AP]M)/i);
-    }
+    if(!m) m = tail.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}).*?(\d{1,2}:\d{2}\s*[AP]M)/i);
     const date = m?.[1] || '';
     const time = m?.[2] || '';
 
@@ -239,19 +223,19 @@
     return `${String(h).padStart(2,'0')}:${min}`;
   }
 
-  // ---------- GEO LOOKUP ----------
+  // ---------- Geo ----------
   let gjW=null, gjB=null, gjP=null;
-  function pointIn(poly,x,y){
+  const pointIn = (poly,x,y) => {
     let inside=false;
     for(const ring of poly){
       for(let i=0,j=ring.length-1;i<ring.length;j=i++){
         const xi=ring[i][0], yi=ring[i][1], xj=ring[j][0], yj=ring[j][1];
-        const inter = ((yi>y)!==(yj>y)) && (x < (xj-xi)*(y-yi)/(yj-yi)+xi);
+        const inter=((yi>y)!==(yj>y)) && (x < (xj-xi)*(y-yi)/(yj-yi)+xi);
         if(inter) inside=!inside;
       }
     }
     return inside;
-  }
+  };
   async function ensureGeo(){
     if(gjW&&gjB&&gjP) return;
     start('geo');
@@ -269,19 +253,19 @@
     if(!Number.isFinite(LON)||!Number.isFinite(LAT)) return out;
 
     // wards
-    for(const f of gjW.features||[]){
+    for(const f of (gjW?.features||[])){
       const g=f.geometry; if(!g) continue;
       if(g.type==='Polygon'){ if(pointIn(g.coordinates,LON,LAT)){ out.ward=f.properties?.WARD||f.properties?.name||''; break; } }
       else if(g.type==='MultiPolygon'){ for(const poly of g.coordinates){ if(pointIn(poly,LON,LAT)){ out.ward=f.properties?.WARD||f.properties?.name||''; break; } } if(out.ward)break; }
     }
     // beats
-    for(const f of gjB.features||[]){
+    for(const f of (gjB?.features||[])){
       const g=f.geometry; if(!g) continue;
       if(g.type==='Polygon'){ if(pointIn(g.coordinates,LON,LAT)){ out.beat=f.properties?.BEAT||f.properties?.name||''; break; } }
       else if(g.type==='MultiPolygon'){ for(const poly of g.coordinates){ if(pointIn(poly,LON,LAT)){ out.beat=f.properties?.BEAT||f.properties?.name||''; break; } } if(out.beat)break; }
     }
     // PS
-    for(const f of gjP.features||[]){
+    for(const f of (gjP?.features||[])){
       const g=f.geometry; if(!g) continue;
       if(g.type==='Polygon'){ if(pointIn(g.coordinates,LON,LAT)){ out.ps=f.properties?.PS||f.properties?.name||''; break; } }
       else if(g.type==='MultiPolygon'){ for(const poly of g.coordinates){ if(pointIn(poly,LON,LAT)){ out.ps=f.properties?.PS||f.properties?.name||''; break; } } if(out.ps)break; }
@@ -289,7 +273,7 @@
     return out;
   }
 
-  // ---------- PROCESS ----------
+  // ---------- process ----------
   async function process(file){
     try{
       resetUI();
@@ -305,7 +289,7 @@
 
       await ensureGeo();
 
-      // OCR on multiple candidate crops
+      // OCR on candidates
       start('ocr');
       const cands = candidates(img);
       let best=null;
@@ -314,16 +298,14 @@
         const text = await ocr(canvas);
         const parsed = parseHUD(text);
         const sc = score(parsed);
-        if(!best || sc>best.sc){ best={canvas,parsed,sc,raw:text}; }
+        if(!best || sc>best.sc) best={canvas,parsed,sc};
       }
       ok('ocr');
 
-      if(!best){ err('parse'); setBanner('Could not read HUD text. Try clearer photo.', 'warning'); return; }
+      if(!best){ err('parse'); setBanner('Could not read HUD text. Try a clearer photo.', 'warning'); return; }
 
-      // Show crop
       el.hud.src = best.canvas.toDataURL('image/jpeg', .9);
 
-      // Populate fields
       start('parse');
       const {date,time,lat,lon,address} = best.parsed;
       $('#r-date').textContent = date || '—';
@@ -334,13 +316,10 @@
 
       const llOk = plausible(lat,CFG.LAT_RANGE) && plausible(lon,CFG.LON_RANGE);
       if(!date || !time || !address || !llOk){
-        err('parse');
-        setBanner('Parsed partially. Verify date/time, address, latitude and longitude.', 'warning');
-        return;
+        err('parse'); setBanner('Parsed partially. Check date/time, address, latitude & longitude.', 'warning'); return;
       }
       ok('parse');
 
-      // Geo
       const g = geoLookup(lat,lon);
       $('#r-ward').textContent = g.ward || '—';
       $('#r-beat').textContent = g.beat || '—';
@@ -380,7 +359,7 @@
     setBanner('', 'info'); el.banner.hidden=true;
     [el.original, el.hud].forEach(i=>i && (i.src=''));
     ['r-date','r-time','r-lat','r-lon','r-addr','r-ward','r-beat','r-ps'].forEach(id=>{ const n=$('#'+id); if(n) n.textContent='—'; });
-    Object.values(pills).forEach(p=>{ p.classList.remove('pill--ok','pill--err','pill--pending'); p.querySelector('.pill__time').textContent=''; });
+    Object.values(pills).forEach(p=>{ p.classList.remove('pill--ok','pill--err','pill--pending'); const t=p.querySelector('.pill__time'); if(t) t.textContent=''; });
   }
 
 })();
