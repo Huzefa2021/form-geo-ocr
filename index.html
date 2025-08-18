@@ -2,105 +2,124 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>MCGM – Abandoned Vehicles (Marshal Upload)</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-
-  <!-- Styles -->
-  <link rel="stylesheet" href="styles.css?v=2025.08.19.P.2.3" />
-
-  <!-- Tesseract v5 (CDN) -->
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Municipal Corporation of Greater Mumbai — Abandoned Vehicles (Marshal Upload)</title>
+  <link rel="stylesheet" href="styles.css" />
+  <!-- Tesseract v5 (jsDelivr) -->
   <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-
-  <!-- App -->
-  <script defer src="app.js?v=2025.08.19.P.2.3"></script>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 </head>
 <body>
-  <!-- Sticky Header -->
-  <header id="appHeader" class="app-header">
-    <div class="header-top">
-      <div class="brand">
-        <img src="data/mcgm-logo.png" alt="MCGM" class="brand-logo" />
-        <div class="brand-text">
-          <div class="brand-title">Municipal Corporation of Greater Mumbai</div>
-          <div class="brand-sub">Abandoned Vehicles – Marshal Upload</div>
-        </div>
-      </div>
 
-      <div class="header-controls">
-        <span id="cdnBadge" class="badge badge-info" aria-live="polite">CDN: v5 (Loading…)</span>
-        <span id="geoBadge" class="badge badge-info" aria-live="polite">Geo: Loading…</span>
-        <button id="btnReset" type="button" class="btn btn-secondary">Reset</button>
+  <!-- Header -->
+  <header class="app-header">
+    <div class="hdr-left">
+      <img class="mcgm-logo" src="https://www.mcgm.gov.in/com.mcgm.newframework/images/logo_V1.png" alt="MCGM">
+      <div class="hdr-title">
+        <div class="t1">Municipal Corporation of Greater Mumbai</div>
+        <div class="t2">Abandoned Vehicles — Identification &amp; Pre-Notice (Marshal Upload)</div>
       </div>
     </div>
-
-    <!-- Sticky Progress Pills -->
-    <nav class="pillbar" aria-label="Processing status">
-      <span id="pill-upload"   class="pill">Upload</span>
-      <span id="pill-ocr"      class="pill">OCR</span>
-      <span id="pill-parse"    class="pill">Parse</span>
-      <span id="pill-geo"      class="pill">Geo</span>
-      <span id="pill-review"   class="pill">Review</span>
-      <span id="pill-redirect" class="pill">Redirect</span>
-    </nav>
+    <div class="hdr-right">
+      <span id="cdnBadge" class="badge badge-info">CDN: v5 (Loading…)</span>
+      <span id="geoBadge" class="badge badge-warn">Geo: Loading…</span>
+      <button id="btnReset" class="btn btn-danger">Reset</button>
+    </div>
   </header>
 
+  <!-- Pills -->
+  <section id="pillBar" class="pillbar">
+    <button class="pill" id="pill-upload"><span>Upload</span><em>(0.0s)</em></button>
+    <button class="pill" id="pill-ocr"><span>OCR</span><em>(0.0s)</em></button>
+    <button class="pill" id="pill-parse"><span>Parse</span><em>(0.0s)</em></button>
+    <button class="pill" id="pill-geo"><span>GeoJSON</span><em>(0.0s)</em></button>
+    <button class="pill" id="pill-review"><span>Review</span><em>(0.0s)</em></button>
+    <button class="pill" id="pill-redirect"><span>Redirect</span><em>(0.0s)</em></button>
+  </section>
+
   <!-- Banner -->
-  <div id="banner" class="banner" hidden></div>
+  <div id="banner" class="banner info" hidden>Updates will appear here…</div>
 
-  <!-- Main Content -->
+  <!-- Content -->
   <main class="container">
-    <section class="card">
-      <h2 class="card-title">Upload Photo</h2>
-      <div id="dropArea" class="drop-area" role="button" tabindex="0" aria-label="Click or drop a JPG/PNG image">
-        <input id="fileInput" type="file" accept="image/jpeg,image/png" hidden />
-        <div class="drop-cta">
-          <div class="drop-icon">⬆️</div>
-          <div class="drop-text">Click to select or drag &amp; drop a JPG/PNG</div>
-        </div>
-      </div>
-    </section>
+    <div class="grid">
+      <!-- LEFT: Upload + big previews side-by-side -->
+      <section class="card">
+        <h3>Upload &amp; Previews</h3>
 
-    <section class="grid-2">
-      <div class="card">
-        <h2 class="card-title">Original</h2>
-        <div class="img-wrap">
-          <img id="imgOriginal" alt="Original preview" />
+        <div id="dropArea" class="droparea" tabindex="0" role="button" aria-label="Tap or drop to choose image">
+          <div class="drop-invite">
+            <div class="cam-emoji">📷</div>
+            <div class="txt-1">Tap to choose image</div>
+            <div class="txt-2">or drag &amp; drop (JPG/PNG from GPS Map Camera)</div>
+          </div>
+          <input id="fileInput" type="file" accept="image/jpeg,image/png" class="hidden-input" />
         </div>
-      </div>
-      <div class="card">
-        <h2 class="card-title">HUD Crop</h2>
-        <div class="img-wrap">
-          <img id="imgCrop" alt="Cropped HUD preview" />
+
+        <div class="preview-grid">
+          <figure class="preview-col">
+            <figcaption>Original Preview (25%)</figcaption>
+            <img id="imgOriginal" class="preview-img preview-25" alt="Original Preview (25%)" />
+          </figure>
+          <figure class="preview-col">
+            <figcaption>Cropped HUD Preview (50%)</figcaption>
+            <img id="imgCrop" class="preview-img preview-50" alt="Cropped HUD Preview (50%)" />
+          </figure>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <section id="resultsCard" class="card">
-      <h2 class="card-title">Parsed Results</h2>
-      <div class="results">
-        <div class="res-row"><label>Date</label><div id="resDate">—</div></div>
-        <div class="res-row"><label>Time</label><div id="resTime">—</div></div>
-        <div class="res-row"><label>Latitude</label><div id="resLat">—</div></div>
-        <div class="res-row"><label>Longitude</label><div id="resLon">—</div></div>
-        <div class="res-row"><label>Ward</label><div id="resWard">—</div></div>
-        <div class="res-row"><label>Beat</label><div id="resBeat">—</div></div>
-        <div class="res-row"><label>Police Station</label><div id="resPS">—</div></div>
-        <div class="res-row res-address"><label>Address</label><div id="resAddr">—</div></div>
-      </div>
-    </section>
+      <!-- RIGHT: Results + Console + BBox debug -->
+      <section class="card">
+        <h3>Results</h3>
+        <div class="results">
+          <dl>
+            <dt>Date</dt><dd id="resDate">—</dd>
+            <dt>Time</dt><dd id="resTime">—</dd>
+            <dt>Latitude</dt><dd id="resLat">—</dd>
+            <dt>Longitude</dt><dd id="resLon">—</dd>
+            <dt>Address</dt><dd id="resAddr">—</dd>
+            <dt>Ward</dt><dd id="resWard">—</dd>
+            <dt>Beat No.</dt><dd id="resBeat">—</dd>
+            <dt>Police Station</dt><dd id="resPS">—</dd>
+          </dl>
+        </div>
 
-    <!-- Developer Console (collapsible if you want later; kept simple now) -->
-    <section id="console-box" class="card console">
-      <h2 class="card-title">Console</h2>
-      <pre id="console-pre">Logs will appear here…</pre>
-    </section>
+        <div id="console-box" class="console-box card-inset">
+          <div class="console-head">
+            <strong>Console Output</strong>
+            <div class="console-actions">
+              <button id="consoleCopy" class="btn btn-primary btn-sm" type="button">Copy</button>
+              <button id="consoleToggle" class="btn btn-primary btn-sm" type="button" aria-expanded="true">Hide</button>
+            </div>
+          </div>
+          <pre id="console-pre" aria-live="polite">Logs will appear here…</pre>
+        </div>
+
+        <!-- BBox Debug Canvas -->
+        <div class="bbox-wrap card-inset">
+          <div class="console-head">
+            <strong>GeoJSON BBoxes</strong>
+            <span class="hint">Overview of polygon bounds + hit point</span>
+          </div>
+          <canvas id="geoCanvas" width="600" height="380" class="bbox-canvas"></canvas>
+        </div>
+      </section>
+    </div>
   </main>
 
-  <!-- Sticky Footer (simple, centered) -->
+  <!-- Sticky Footer (center text) -->
   <footer class="app-footer">
-    <div class="footer-inner">
-      © MCGM • Built with support from Crescendo
+    <div class="ftext">
+      © 2025 Municipal Corporation of Greater Mumbai (MCGM) —
+      Developed by <strong>Crescendo Innovative Solutions LLP</strong> ·
+      Admin: <a href="mailto:Care@crescendoits.com">Care@crescendoits.com</a> ·
+      <a href="https://www.mcgm.gov.in" target="_blank" rel="noreferrer">www.mcgm.gov.in</a> ·
+      <span id="buildId">Build: v2025.08.18.Prod</span>
     </div>
   </footer>
+
+  <!-- App -->
+  <script defer src="app.js"></script>
 </body>
 </html>
