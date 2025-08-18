@@ -1,63 +1,78 @@
 /* ==========================================================
-   Abandoned Vehicles – Marshal Upload (MCGM)
-   Simplified Flow (2025-08-18)
-   - Drag & drop + single picker
-   - Dynamic crop of bottom HUD (no preprocessing)
-   - OCR with Tesseract.js v5 (eng+hin+mar)
-   - Parse rules: ignore line1; address lines 1–3; second-last = lat/long; last = date/time
-   - GeoJSON lookup (wards, beats, police_jurisdiction)
-   - Auto redirect; show manual button if blocked
+   Abandoned Vehicles — Marshal Upload (MCGM)
+   Minimal app.js (no UI changes, no preprocessing)
+   Flow: Upload → Crop HUD → OCR → Parse → GeoJSON → Redirect
    ========================================================== */
 
-const el = (id) => document.getElementById(id);
+const $ = (id) => document.getElementById(id);
 
-// -------------------- UI Elements --------------------
-const fileInput   = el('fileInput');
-const dropArea    = el('dropArea');
-const imgOriginal = el('imgOriginal');
-const imgCrop     = el('imgCrop');
+// ---- UI elements (must match IDs already in index.html)
+const fileInput   = $('fileInput');
+const dropArea    = $('dropArea');
+const imgOriginal = $('imgOriginal');
+const imgCrop     = $('imgCrop');
 
-// Result display fields
-const outDate  = el('resDate');
-const outTime  = el('resTime');
-const outLat   = el('resLat');
-const outLon   = el('resLon');
-const outAddr  = el('resAddr');
-const outWard  = el('resWard');
-const outBeat  = el('resBeat');
-const outPS    = el('resPS');
+// Results (text placeholders)
+const outDate = $('resDate');
+const outTime = $('resTime');
+const outLat  = $('resLat');
+const outLon  = $('resLon');
+const outAddr = $('resAddr');
+const outWard = $('resWard');
+const outBeat = $('resBeat');
+const outPS   = $('resPS');
 
-// Pills (status indicators for each step)
+// Pills (status)
 const pills = {
-  upload: el('pill-upload'),
-  ocr: el('pill-ocr'),
-  parse: el('pill-parse'),
-  geo: el('pill-geo'),
-  review: el('pill-review'),
-  redirect: el('pill-redirect'),
+  upload: $('pill-upload'),
+  ocr: $('pill-ocr'),
+  parse: $('pill-parse'),
+  geo: $('pill-geo'),
+  review: $('pill-review'),
+  redirect: $('pill-redirect')
 };
 
-// Reset button
-el('btnReset').addEventListener('click', () => location.reload());
+$('btnReset')?.addEventListener('click', () => location.reload());
 
-// Utility: set pill state
-function setPill(which, state) {
-  const p = pills[which];
-  if (!p) return;
+// ---- Utilities
+function setPill(name, state) {
+  const p = pills[name]; if (!p) return;
   p.classList.remove('ok', 'run', 'err');
   if (state) p.classList.add(state);
 }
-
-// Utility: set banner message
-function setBanner(msg, kind = 'info') {
-  const b = el('banner');
+function banner(msg, kind = 'info') {
+  const b = $('banner');
+  if (!b) return;
   if (!msg) { b.hidden = true; return; }
   b.hidden = false;
   b.textContent = msg;
   b.className = `banner ${kind}`;
 }
+function resetOutputs() {
+  ['upload','ocr','parse','geo','review','redirect'].forEach(k => setPill(k, null));
+  [outDate,outTime,outLat,outLon,outAddr,outWard,outBeat,outPS].forEach(o => o && (o.textContent = '—'));
+  if (imgOriginal) imgOriginal.src = '';
+  if (imgCrop) imgCrop.src = '';
+  banner('');
+}
+function fileToDataURL(file) {
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(fr.result);
+    fr.onerror = rej;
+    fr.readAsDataURL(file);
+  });
+}
+function loadImage(url) {
+  return new Promise((res, rej) => {
+    const im = new Image();
+    im.onload = () => res(im);
+    im.onerror = rej;
+    im.src = url;
+  });
+}
 
-// -------------------- Google Form Mapping --------------------
+// ---- Google Form mapping (unchanged)
 const FORM_BASE = 'https://docs.google.com/forms/d/e/1FAIpQLSeo-xlOSxvG0IwtO5MkKaTJZNJkgTsmgZUw-FBsntFlNdRnCw/viewform?usp=pp_url';
 const ENTRY = {
   date: 'entry.1911996449',
@@ -70,98 +85,103 @@ const ENTRY = {
   ps  : 'entry.1555105834'
 };
 
-// -------------------- Drag & Drop --------------------
-dropArea.addEventListener('click', () => fileInput.click());
-dropArea.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
-fileInput.addEventListener('click', (e) => { e.target.value = ''; });
-fileInput.addEventListener('change', (e) => { const f = e.target.files?.[0]; if (f) handleFile(f); });
-
-['dragenter','dragover'].forEach(t => dropArea.addEventListener(t, e => { e.preventDefault(); dropArea.classList.add('dragover'); }));
-['dragleave','drop'].forEach(t => dropArea.addEventListener(t, e => { e.preventDefault(); dropArea.classList.remove('dragover'); }));
-dropArea.addEventListener('drop', (e) => {
-  const f = [...(e.dataTransfer?.files || [])].find(f => /^image\//i.test(f.type));
+// ---- Drag & Drop / File select (images only)
+dropArea?.addEventListener('click', () => fileInput?.click());
+dropArea?.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') fileInput?.click(); });
+fileInput?.addEventListener('click', (e) => { e.target.value = ''; });
+fileInput?.addEventListener('change', (e) => {
+  const f = e.target.files?.[0];
+  if (f) handleFile(f);
+});
+['dragenter','dragover'].forEach(t =>
+  dropArea?.addEventListener(t, (e) => { e.preventDefault(); dropArea.classList.add('dragover'); })
+);
+['dragleave','drop'].forEach(t =>
+  dropArea?.addEventListener(t, (e) => { e.preventDefault(); dropArea.classList.remove('dragover'); })
+);
+dropArea?.addEventListener('drop', (e) => {
+  e.preventDefault();
+  const f = [...(e.dataTransfer?.files || [])].find(x => /^image\//i.test(x.type));
   if (f) handleFile(f);
 });
 
-// -------------------- Core Flow --------------------
+// ---- Core flow
 async function handleFile(file) {
-  // Step 1: Validate file
   if (!/^image\/(jpe?g|png)$/i.test(file.type)) {
-    setBanner('Please choose a JPG or PNG.', 'error');
-    return;
+    banner('Please choose a JPG or PNG.', 'error'); return;
   }
 
-  // Reset UI outputs
   resetOutputs();
 
-  // Step 2: Upload image
-  setPill('upload', 'run');
+  // Upload preview
+  setPill('upload','run');
   const dataURL = await fileToDataURL(file);
-  imgOriginal.src = dataURL;
-  setPill('upload', 'ok');
+  if (imgOriginal) imgOriginal.src = dataURL;
+  setPill('upload','ok');
 
-  // Step 3: Crop HUD (bottom GPS overlay)
-  setPill('ocr', 'run');
-  const cropURL = await cropHud(dataURL);
-  imgCrop.src = cropURL;
-
-  // Step 4: OCR (Tesseract.js v5)
-  let text = '';
+  // Crop HUD
+  setPill('ocr','run');
+  let cropURL;
   try {
-    const res = await Tesseract.recognize(
-      cropURL,
-      'eng+hin+mar',
-      {
-        logger: _ => {},
-        tessedit_pageseg_mode: 6 // single uniform block
-      }
-    );
-    text = (res?.data?.text || '').trim();
-    console.log('Raw OCR Text:', text);
-    setPill('ocr', 'ok');
+    cropURL = await cropHud(dataURL);
+    if (imgCrop) imgCrop.src = cropURL;
+  } catch (err) {
+    banner('Crop failed. Please retry with a clearer photo.', 'error');
+    setPill('ocr','err'); return;
+  }
+
+  // OCR (Tesseract v5, no preprocessing)
+  if (!window.Tesseract || !Tesseract.recognize) {
+    banner('OCR engine not loaded. Check CDN.', 'error');
+    setPill('ocr','err'); return;
+  }
+
+  let rawText = '';
+  try {
+    const res = await Tesseract.recognize(cropURL, 'eng+hin+mar', {
+      logger: () => {},
+      tessedit_pageseg_mode: 6 // single uniform block
+    });
+    rawText = (res?.data?.text || '').trim();
+    setPill('ocr','ok');
   } catch (e) {
-    console.error('Tesseract error:', e);
-    setPill('ocr', 'err');
-    setBanner('OCR failed. Try clearer photo.', 'error');
-    return;
+    banner('OCR failed. Try clearer photo.', 'error');
+    setPill('ocr','err'); return;
   }
 
-  // Step 5: Parse OCR output
-  setPill('parse', 'run');
-  const parsed = parseHudText(text);
-  console.log('Parsed Fields:', parsed);
+  // Parse
+  setPill('parse','run');
+  const parsed = parseHudText(rawText);
   if (!parsed.date || !parsed.time || isNaN(parsed.lat) || isNaN(parsed.lon) || !parsed.address) {
-    setPill('parse', 'err');
-    setBanner('Could not parse all fields from HUD.', 'error');
-    return;
+    banner('Could not parse all fields from HUD.', 'error');
+    setPill('parse','err'); return;
   }
-  setPill('parse', 'ok');
+  setPill('parse','ok');
 
-  // Display parsed values
-  outDate.textContent = parsed.date;
-  outTime.textContent = parsed.time;
-  outLat.textContent  = parsed.lat.toFixed(6);
-  outLon.textContent  = parsed.lon.toFixed(6);
-  outAddr.textContent = parsed.address;
+  // Show parsed
+  outDate && (outDate.textContent = parsed.date);
+  outTime && (outTime.textContent = parsed.time);
+  outLat  && (outLat.textContent  = parsed.lat.toFixed(6));
+  outLon  && (outLon.textContent  = parsed.lon.toFixed(6));
+  outAddr && (outAddr.textContent = parsed.address);
 
-  // Step 6: GeoJSON lookup
-  setPill('geo', 'run');
+  // GeoJSON lookup
+  setPill('geo','run');
   await ensureGeo();
   const gj = geoLookup(parsed.lat, parsed.lon);
-  outWard.textContent = gj.ward || '—';
-  outBeat.textContent = gj.beat || '—';
-  outPS.textContent   = gj.ps   || '—';
   if (!gj.ward || !gj.beat || !gj.ps) {
-    setPill('geo', 'err');
-    setBanner('GeoJSON lookup failed.', 'error');
-    return;
+    banner('GeoJSON lookup failed.', 'error');
+    setPill('geo','err'); return;
   }
-  setPill('geo', 'ok');
+  outWard && (outWard.textContent = gj.ward);
+  outBeat && (outBeat.textContent = gj.beat);
+  outPS   && (outPS.textContent   = gj.ps);
+  setPill('geo','ok');
 
-  // Step 7: Review complete
-  setPill('review', 'ok');
+  // Review complete
+  setPill('review','ok');
 
-  // Step 8: Redirect / Fallback button
+  // Redirect (with fallback button)
   const url = new URL(FORM_BASE);
   url.searchParams.set(ENTRY.date, parsed.date);
   url.searchParams.set(ENTRY.time, parsed.time);
@@ -173,125 +193,94 @@ async function handleFile(file) {
   url.searchParams.set(ENTRY.ps,   gj.ps);
 
   try {
-    setPill('redirect', 'run');
+    setPill('redirect','run');
     window.open(url.toString(), '_blank', 'noopener');
-    setPill('redirect', 'ok');
+    setPill('redirect','ok');
   } catch {
-    setPill('redirect', 'err');
-    setBanner('Auto-redirect failed. Please use the button below.', 'error');
+    setPill('redirect','err');
+    banner('Auto-redirect failed. Please use the button below.', 'error');
     addManualRedirect(url.toString());
   }
 }
 
-// Reset outputs between runs
-function resetOutputs() {
-  ['upload','ocr','parse','geo','review','redirect'].forEach(k => setPill(k, null));
-  [outDate,outTime,outLat,outLon,outAddr,outWard,outBeat,outPS].forEach(o => o.textContent = '—');
-  imgOriginal.src = '';
-  imgCrop.src = '';
-  setBanner('', 'info');
-}
-
-// Convert file to base64 data URL
-function fileToDataURL(file) {
-  return new Promise((resolve, reject) => {
-    const fr = new FileReader();
-    fr.onload = () => resolve(fr.result);
-    fr.onerror = reject;
-    fr.readAsDataURL(file);
-  });
-}
-
-// -------------------- Dynamic Crop of Bottom HUD --------------------
-// - Scans bottom ~40% to find darkest band (HUD background)
-// - Adds safety margins; trims left to dodge the mini Google map
+// ---- Dynamic crop of bottom GPS HUD (no preprocessing)
 async function cropHud(dataURL) {
   const img = await loadImage(dataURL);
   const W = img.naturalWidth, H = img.naturalHeight;
 
-  // Helper canvas for fast luminance scan
+  // downscale for quick analysis
+  const hw = Math.max(200, Math.floor(W * 0.2));
+  const hh = Math.max(200, Math.floor(H * 0.2));
   const helper = document.createElement('canvas');
-  helper.width = Math.max(200, Math.floor(W * 0.2));
-  helper.height = Math.max(200, Math.floor(H * 0.2));
+  helper.width = hw; helper.height = hh;
   const hctx = helper.getContext('2d');
-  hctx.drawImage(img, 0, 0, helper.width, helper.height);
+  hctx.drawImage(img, 0, 0, hw, hh);
 
-  const data = hctx.getImageData(0, 0, helper.width, helper.height).data;
-  const rows = helper.height, cols = helper.width;
-  const luminance = new Array(rows).fill(0);
+  const data = hctx.getImageData(0, 0, hw, hh).data;
+  const rows = hh, cols = hw;
+
+  // average luminance per row
+  const L = new Array(rows).fill(0);
   for (let y = 0; y < rows; y++) {
-    let sum = 0;
+    let s = 0;
     for (let x = 0; x < cols; x++) {
       const i = (y * cols + x) * 4;
       const r = data[i], g = data[i+1], b = data[i+2];
-      sum += 0.2126*r + 0.7152*g + 0.0722*b; // Rec.709
+      s += 0.2126*r + 0.7152*g + 0.0722*b;
     }
-    luminance[y] = sum / cols;
+    L[y] = s / cols;
   }
 
-  // Search the bottom 40% for the darkest band top
-  const startRow = Math.floor(rows * 0.60);
-  let hudTopRow = rows - Math.floor(rows * 0.25); // fallback
+  // locate darkest band near bottom (HUD)
+  const searchFrom = Math.floor(rows * 0.60);
+  let hudTopRow = rows - Math.floor(rows * 0.25);
   let minAvg = 255;
-  for (let y = rows - 1; y >= startRow; y--) {
-    if (luminance[y] < minAvg) { minAvg = luminance[y]; hudTopRow = y; }
+  for (let y = rows - 1; y >= searchFrom; y--) {
+    if (L[y] < minAvg) { minAvg = L[y]; hudTopRow = y; }
   }
 
-  // Map to original image coordinates with margin
+  // map to full image; add safety margin
   let sy = Math.max(0, Math.floor(hudTopRow / rows * H) - Math.floor(H * 0.02));
-  sy = Math.min(Math.max(sy, Math.floor(H * 0.65)), Math.floor(H * 0.78)); // clamp
-
-  // Height ~32% (clamped to bottom)
-  let sh = Math.floor(H * 0.32);
+  sy = Math.min(Math.max(sy, Math.floor(H * 0.62)), Math.floor(H * 0.80)); // clamp
+  let sh = Math.floor(H * 0.34);
   if (sy + sh > H) sh = H - sy;
 
-  // Left trim detection (mini map)
+  // detect mini Google map at bottom-left → trim more left when busy
   let sx = Math.floor(W * 0.24);
-  const probeW = Math.floor(cols * 0.18), probeY0 = Math.floor(rows * 0.82);
+  const probeW = Math.floor(cols * 0.18);
+  const probeY0 = Math.floor(rows * 0.82);
   let s=0, s2=0, n=0;
   for (let y = probeY0; y < rows; y++) {
     for (let x = 0; x < probeW; x++) {
       const i = (y*cols + x)*4;
-      const L = 0.2126*data[i] + 0.7152*data[i+1] + 0.0722*data[i+2];
-      s += L; s2 += L*L; n++;
+      const ll = 0.2126*data[i] + 0.7152*data[i+1] + 0.0722*data[i+2];
+      s += ll; s2 += ll*ll; n++;
     }
   }
-  const mean = s/Math.max(1,n);
-  const variance = s2/Math.max(1,n) - mean*mean;
-  if (variance > 1500) sx = Math.floor(W * 0.30);
+  const mean = s / Math.max(1,n);
+  const variance = s2 / Math.max(1,n) - mean*mean;
+  if (variance > 1500) sx = Math.floor(W * 0.30); // more aggressive left cut
 
   const rightPad = Math.floor(W * 0.02);
-  const sw = W - sx - rightPad;
+  let sw = W - sx - rightPad;
+  if (sw < Math.floor(W * 0.40)) sw = Math.floor(W * 0.40); // guard
 
+  // final crop
   const c = document.createElement('canvas');
   c.width = sw; c.height = sh;
   const ctx = c.getContext('2d');
   ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-
-  console.log('Crop metrics:', { sx, sy, sw, sh, W, H, variance: Math.round(variance) });
   return c.toDataURL('image/png');
 }
 
-// Helper: load image
-function loadImage(url) {
-  return new Promise((res, rej) => {
-    const im = new Image();
-    im.onload = () => res(im);
-    im.onerror = rej;
-    im.src = url;
-  });
-}
-
-// -------------------- Parsing --------------------
-// Parse OCR lines into address, lat/lon, date/time
+// ---- Parsing (no extra heuristics beyond agreed rules)
 function parseHudText(raw) {
-  const lines = raw.split(/\n/).map(l => l.trim()).filter(Boolean);
+  const lines = raw.split(/\n/).map(s => s.trim()).filter(Boolean);
   if (lines.length < 3) return {};
 
-  const last = lines[lines.length - 1]; // date/time
-  const prev = lines[lines.length - 2]; // lat/lon
-  const addrLines = lines.slice(1, lines.length - 2); // address 1–3 lines
-  const address = addrLines.join(', ');
+  const last = lines[lines.length - 1];   // date/time
+  const prev = lines[lines.length - 2];   // lat/long
+  const address = lines.slice(1, lines.length - 2).join(', ');
 
   const latM = prev.match(/Lat[^0-9]*([+-]?[0-9]+\.?[0-9]*)/i);
   const lonM = prev.match(/Long[^0-9]*([+-]?[0-9]+\.?[0-9]*)/i);
@@ -301,60 +290,57 @@ function parseHudText(raw) {
   let date = '', time = '';
   const dt = last.replace(/GMT.*$/,'').trim();
   const m = dt.match(/(\d{1,2}\/\d{1,2}\/\d{4})\s+(\d{1,2}:\d{2}(?:\s*[AP]M)?)/)
-        || dt.match(/(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2}(?:\s*[AP]M)?)/);
+          || dt.match(/(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2}(?:\s*[AP]M)?)/);
   if (m) { date = m[1]; time = m[2]; }
 
   return { address, lat, lon, date, time };
 }
 
-// -------------------- GeoJSON --------------------
-let gjW = null, gjB = null, gjP = null;
+// ---- GeoJSON (simple, synchronous after initial fetch)
+let gjW=null, gjB=null, gjP=null;
 
 async function ensureGeo() {
   if (gjW && gjB && gjP) return;
-  const [w, b, p] = await Promise.all([
-    fetch('data/wards.geojson').then(r => r.json()),
-    fetch('data/beats.geojson').then(r => r.json()),
-    fetch('data/police_jurisdiction.geojson').then(r => r.json()),
+  const [w,b,p] = await Promise.all([
+    fetch('data/wards.geojson').then(r=>r.json()),
+    fetch('data/beats.geojson').then(r=>r.json()),
+    fetch('data/police_jurisdiction.geojson').then(r=>r.json())
   ]);
-  gjW = w; gjB = b; gjP = p;
+  gjW=w; gjB=b; gjP=p;
 }
 
 function geoLookup(lat, lon) {
-  const out = { ward: '', beat: '', ps: '' };
+  const out = { ward:'', beat:'', ps:'' };
   if (!gjW || !gjB || !gjP) return out;
 
   const pt = [lon, lat];
-  const inPoly = (g) => {
-    if (g.type === 'Polygon') return pointInPoly(g.coordinates, pt);
-    if (g.type === 'MultiPolygon') return g.coordinates.some(r => pointInPoly(r, pt));
-    return false;
-  };
+  const inGeom = (g) =>
+    g.type === 'Polygon'      ? pointInPoly(g.coordinates, pt) :
+    g.type === 'MultiPolygon' ? g.coordinates.some(r => pointInPoly(r, pt)) : false;
 
-  for (const f of gjW.features) { if (inPoly(f.geometry)) { out.ward = f.properties.WARD || ''; break; } }
-  for (const f of gjB.features) { if (inPoly(f.geometry)) { out.beat = f.properties.BEAT_NO || ''; break; } }
-  for (const f of gjP.features) { if (inPoly(f.geometry)) { out.ps   = f.properties.PS_NAME || ''; break; } }
-
+  for (const f of gjW.features) if (inGeom(f.geometry)) { out.ward = f.properties.WARD || ''; break; }
+  for (const f of gjB.features) if (inGeom(f.geometry)) { out.beat = f.properties.BEAT_NO || ''; break; }
+  for (const f of gjP.features) if (inGeom(f.geometry)) { out.ps   = f.properties.PS_NAME || ''; break; }
   return out;
 }
 
-function pointInPoly(poly, pt) {
-  const [x, y] = pt;
+// standard ray-casting point-in-polygon
+function pointInPoly(poly, [x,y]) {
   let inside = false;
   for (const ring of poly) {
-    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-      const xi = ring[i][0], yi = ring[i][1];
-      const xj = ring[j][0], yj = ring[j][1];
-      const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+    for (let i=0, j=ring.length-1; i<ring.length; j=i++) {
+      const xi=ring[i][0], yi=ring[i][1];
+      const xj=ring[j][0], yj=ring[j][1];
+      const intersect = ((yi>y)!==(yj>y)) && (x < (xj-xi)*(y-yi)/(yj-yi)+xi);
       if (intersect) inside = !inside;
     }
   }
   return inside;
 }
 
-// -------------------- Manual Redirect --------------------
+// fallback button if popup blocked
 function addManualRedirect(url) {
-  let btn = el('manualRedirect');
+  let btn = $('manualRedirect');
   if (!btn) {
     btn = document.createElement('button');
     btn.id = 'manualRedirect';
