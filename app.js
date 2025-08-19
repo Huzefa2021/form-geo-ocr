@@ -34,7 +34,7 @@ const pills = {
   review: $('pill-review'),
   redirect: $('pill-redirect'),
 };
-
+/*
 const cdnBadge = document.getElementById('cdnBadge');
 const geoBadge = document.getElementById('geoBadge');
 
@@ -43,7 +43,7 @@ function setBadge(badgeEl, stateText, stateClass) {
   badgeEl.textContent = stateText;
   badgeEl.className = `badge ${stateClass}`;
 }
-
+*/
 let lastRedirectUrl = '';
 
 /* ---------- Badges ---------- */
