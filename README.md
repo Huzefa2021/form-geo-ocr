@@ -1,118 +1,177 @@
-# 📌 Abandoned Vehicles OCR + GeoJSON → Google Form
+# 🚗 Abandoned Vehicles – OCR + GeoJSON Mapper (MCGM Marshal Upload)
 
-This repository hosts a **browser-based helper portal** for MCGM field marshals.
-It allows uploading a **GPS Map Camera photo**, automatically extracting details using OCR, matching location against GeoJSON boundaries, and redirecting to a prefilled **Google Form**.
-
----
-
-## 🚀 Features
-
-* 📤 **Drag & Drop Upload** or choose file from device
-* 🔎 **Live OCR** (date, time, latitude, longitude, address from image text)
-* 🌍 **GeoJSON Lookup**:
-
-  * WARD → from `wards.geojson`
-  * BEAT_NO → from `beats.geojson`
-  * PS_NAME → from `police_jurisdiction.geojson`
-* 📊 **Progress Milestones** with animated scanner effect for visual appeal
-* 📝 **Review Panel**: all OCR + GeoJSON data displayed before redirect
-* 🔗 **One-click redirect** to Google Form with fields prefilled
+This project provides a **browser-based application** for field marshals to upload GPS-tagged photographs of abandoned vehicles.  
+It performs **OCR (Optical Character Recognition)** on the HUD (Heads-Up Display) of photos, parses the address/coordinates/date/time,  
+matches the coordinates against **BMC Wards, Beats, and Police Station boundaries (GeoJSON)**, and then **auto-prefills a Google Form**.
 
 ---
 
-## 📂 Repository Structure
+## ✨ Features & Flow
+
+1. **Upload Image**
+   - Drag-and-drop or file picker accepts **JPG/PNG**.
+   - Both original and cropped HUD section previewed.
+
+2. **Crop HUD**
+   - Static crop box defined (covers GPS HUD overlay).
+   - Small buffer added for consistent results across devices.
+
+3. **OCR (Tesseract.js v5)**
+   - Multi-language recognition (`eng+hin+mar`).
+   - Preprocessing (contrast, threshold) improves recognition.
+   - Raw OCR text logged to on-screen console.
+
+4. **Parse HUD Data**
+   - **Line 1 ignored** (usually branding from GPS Camera app).
+   - Middle lines → address (1–3 lines).
+   - Second-last line → Latitude & Longitude.
+   - Last line → Date & Time (normalized to `YYYY-MM-DD` and `HH:mm` for Google Form).
+   - Garbage entries automatically removed.
+
+5. **GeoJSON Lookup**
+   - Coordinates matched against:
+     - `wards.geojson`
+     - `beats.geojson`
+     - `police_jurisdiction.geojson`
+   - Returns Ward ID, Beat Number, and Police Station name.
+   - Bounding-box check precomputed for performance.
+   - Status indicator shows **Loaded / Error**.
+
+6. **Console Section**
+   - Shows:
+     - Raw OCR Text
+     - Parsed Fields (address, lat/lon, date/time)
+     - GeoJSON match results
+     - Redirect URL preview
+   - Timestamped logs for each step.
+
+7. **Status Pills**
+   - Each stage (Upload → OCR → Parse → Geo → Review → Redirect) updates live.
+   - Flashing pill indicates active stage.
+   - Final redirect pill clickable if auto-redirect blocked.
+
+8. **Google Form Prefill**
+   - Fields mapped to Google Form entries.
+   - Auto-redirects to form with data prefilled.
+   - If blocked, manual redirect button provided.
+
+---
+
+## 🛠️ Technical Details
+
+- **Frontend only** (no backend, no cloud storage).
+- **Languages:** HTML5, CSS3, JavaScript (ES6+).
+- **OCR Engine:** [Tesseract.js v5](https://tesseract.projectnaptha.com/).
+- **Mapping:** GeoJSON (wards, beats, police jurisdictions).
+- **Deployment:** GitHub Pages / Railway / any static hosting.
+- **Browser Support:** Optimized for **mobile devices** (field use).
+
+---
+
+## 📂 Project Structure
 
 ```
-.
-├─ index.html                      # Main helper page (UI + OCR + GeoJSON + prefill)
-├─ README.md                       # Documentation (this file)
-├─ /data/
-│  ├─ wards.geojson                # Polygon layer with WARD property
-│  ├─ beats.geojson                # Polygon layer with BEAT_NO property
-│  └─ police_jurisdiction.geojson  # Polygon layer with PS_NAME property
+
+📦 abandoned-vehicles-ocr
+┣ 📂 data
+┃ ┣ wards.geojson
+┃ ┣ beats.geojson
+┃ ┗ police\_jurisdiction.geojson
+┣ 📜 index.html
+┣ 📜 styles.css
+┣ 📜 app.js
+┗ 📜 README.md
+
 ```
+
+- `index.html` → App layout, header/footer, drag-drop zone, preview, console.
+- `styles.css` → Material-style theme, golden MCGM branding, responsive mobile view.
+- `app.js` → Core logic (OCR, parsing, GeoJSON lookup, redirect).
+- `data/*.geojson` → Ward/Beat/Police boundaries.
 
 ---
 
-## ⚙️ Setup Instructions
+## 🚀 Deployment
 
-1. **Clone this repo**
+### GitHub Pages
+1. Push repo to GitHub.
+2. Go to **Repo → Settings → Pages**.
+3. Select branch: `main` → `/root`.
+4. Add an empty file named `.nojekyll` in root.
+   - Prevents GitHub Pages from ignoring `data/` folder.
+5. Site will be live at:
+```
 
-   ```bash
-   git clone https://github.com/<your-username>/<your-repo>.git
-   cd <your-repo>
+https\://<username>.github.io/<repository-name>/
+
+````
+
+### Railway (Optional, for backend integrations)
+- Already compatible with static hosting.
+- Add `static.json` for custom routes if needed.
+
+---
+
+## 🔗 Google Form Integration
+
+- Update **`FORM_BASE`** and **`ENTRY`** constants in `app.js` with your Google Form fields.
+- Date format required: `YYYY-MM-DD`.
+- Time format required: `HH:mm` (24-hr).
+
+Example:
+```js
+url.searchParams.set(ENTRY.date, "2025-08-19");
+url.searchParams.set(ENTRY.time, "14:35");
+````
+
+---
+
+## 🧪 Example Flow
+
+1. Marshal captures photo with **GPS Camera app**.
+2. Uploads photo to app (mobile browser).
+3. HUD cropped, OCR extracts text:
+
    ```
-
-2. **Prepare GeoJSON files**
-
-   * Place your spatial boundary files in `/data/`
-   * Ensure properties exist:
-
-     * `WARD` in `wards.geojson`
-     * `BEAT_NO` in `beats.geojson`
-     * `PS_NAME` in `police_jurisdiction.geojson`
-
-3. **Configure Google Form**
-
-   * Open your Google Form
-   * Copy entry IDs (`entry.xxxxx`) for each field
-   * Update the mapping in `index.html` (already set for: Date, Time, Lat, Lon, Ward, Beat, Address, Police)
-
-4. **Host the page**
-
-   * Easiest: enable **GitHub Pages** in repo settings (or use the included workflow under `.github/workflows/pages.yml`)
-   * Your app will be accessible at:
-
-     ```
-     https://<your-username>.github.io/<your-repo>/
-     ```
+   Mumbai, Maharashtra, India
+   Lat 19.066379° Long 72.864117°
+   18/08/2025 03:09 PM GMT+05:30
+   ```
+4. Parser normalizes → `2025-08-18` + `15:09`.
+5. GeoJSON lookup → Ward H/East, Beat 12, Vakola PS.
+6. App redirects to Google Form with all fields filled.
 
 ---
 
-## 🧑‍💻 Usage (For Marshals)
+## 📱 Mobile-First UI/UX
 
-1. Open the **helper portal link** on your mobile.
-2. **Upload the photo** (drag & drop or choose file).
-3. Wait for the **progress bar** to complete.
-4. Review extracted details:
-
-   * Date & Time
-   * Latitude & Longitude
-   * Address
-   * Ward, Beat, Police Station
-5. Click **Continue to Form** → auto-redirects to the Google Form with fields prefilled.
-6. Submit form as usual.
+* Sticky **header + footer** (MCGM + Crescendo logos with golden glow).
+* Responsive text sizing (clamp units).
+* Material shadows/glows on pillboxes and indicators.
+* Console/log section under image previews.
+* Optimized for **phone screens** (primary users).
 
 ---
 
-## 🖼️ Preview
+## 👨‍💼 Administration
 
-* **Header & Footer** styled like the official MCGM website
-* **Scanner overlay** animation on uploaded image
-* **Step chips**: Upload → OCR → Parse → GeoJSON → Review → Redirect
+* **Municipal Corporation of Greater Mumbai (MCGM)**
+* **Crescendo Innovative Solutions**
+* Admin: **Huzefa Kathawala**
+  📧 [huzefa.k@crescendoits.com](mailto:huzefa.k@crescendoits.com)
 
 ---
 
-## 🛠️ Tech Stack
+## 📌 Versioning
 
-* **HTML + CSS + JavaScript** (pure browser app, no backend)
-* [Tesseract.js](https://tesseract.projectnaptha.com/) → OCR
-* [Turf.js](https://turfjs.org/) → GeoJSON point-in-polygon
-* **Google Forms Prefill API** → auto-redirect
+* Build ID format: `vYYYY.MM.DD.P.x`
+  Example: `v2025.08.19.P.2.2`
 
 ---
 
 ## ⚠️ Notes
 
-* Works best with **GPS Map Camera** format photos (date/time/coords printed clearly).
-* All processing is done in the **browser**. No server storage, no external backend.
-* Ensure good image clarity for best OCR accuracy.
-* GeoJSON must be in **EPSG:4326 (lon/lat)**.
-
----
-
-## 📞 Support
-
-* **Maintainer**: Huzefa Fakhruddin
-* **Organization**: Multifaceted Company
-* For issues: open a GitHub Issue or contact [ptradingmumbai@gmail.com](mailto:ptradingmumbai@gmail.com)
+* Ensure **GeoJSON files** are valid and present in `/data/`.
+* OCR quality depends on photo clarity. Blurry/overexposed HUD may fail.
+* Works offline after first load (assets cached by browser).
+* No data is stored outside Zoho/Google Form — app is stateless.
