@@ -1,11 +1,12 @@
 /* ==========================================================
    Abandoned Vehicles — Marshal Upload (MCGM)
-   Build: v2025.08.19.P.2.2
-   Notes:
-   - Keeps existing stable flow & UI
-   - Normalizes date & time for Google Form prefill:
-     • Date -> dd/MM/yyyy
-     • Time -> hh:mm AM/PM (12‑hour)
+   Build: v2025.08.19.P.2.8
+   - Logos: handled via CSS (72px)
+   - Indicators smaller/responsive (CSS)
+   - Sticky header/pills/banner remain visible
+   - Redirect pill pulses & is clickable (no console link)
+   - Parsing: robust Lat/Lon fallback for OCR noise
+   - Prefill: DATE=YYYY-MM-DD, TIME=HH:mm (24h)
    ========================================================== */
 
 const $ = (id) => document.getElementById(id);
@@ -34,13 +35,23 @@ const pills = {
   redirect: $('pill-redirect'),
 };
 
+const cdnBadge = document.getElementById('cdnBadge');
+const geoBadge = document.getElementById('geoBadge');
+
+function setBadge(badgeEl, stateText, stateClass) {
+  // stateClass: 'badge-info' | 'badge-ok' | 'badge-warn' | 'badge-error'
+  badgeEl.textContent = stateText;
+  badgeEl.className = `badge ${stateClass}`;
+}
+
+let lastRedirectUrl = '';
+
 /* ---------- Badges ---------- */
 function updateCdnBadge(){
   const b = $('cdnBadge'); if(!b) return;
   const ok = !!(window.Tesseract && Tesseract.recognize);
   b.textContent = ok ? 'CDN: v5 (Loaded)' : 'CDN: v5 (Not Loaded)';
-  b.classList.remove('badge-info','badge-err','badge-ok','badge-warn');
-  b.classList.add(ok ? 'badge-ok' : 'badge-err');
+  b.className = `badge ${ok ? 'badge-ok glow' : 'badge-err glow'}`;
 }
 document.addEventListener('DOMContentLoaded', updateCdnBadge);
 window.addEventListener('load', updateCdnBadge);
@@ -48,7 +59,7 @@ window.addEventListener('load', updateCdnBadge);
 /* ---------- Helpers ---------- */
 function setPill(name, state){
   const p = pills[name]; if(!p) return;
-  p.classList.remove('ok','run','err');
+  p.className = p.className.replace(/\b(ok|run|err|pulse)\b/g,'').trim();
   if(state) p.classList.add(state);
 }
 function banner(msg, kind='info'){
@@ -65,16 +76,14 @@ function resetOutputs(){
   if(imgCrop) imgCrop.src = '';
   banner('');
   logToConsole('','', '[Reset]');
+  lastRedirectUrl = '';
 }
 function fileToDataURL(f){ return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=rej; fr.readAsDataURL(f); }); }
 function loadImage(url){ return new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=url; }); }
 
 /* ---------- Console ---------- */
-function ensureConsoleBox(){ return $('console-box'); }
 function logToConsole(rawText, parsed, note=''){
-  const box = ensureConsoleBox();
-  const pre = $('console-pre');
-  if (!box || !pre) return;
+  const pre = $('console-pre'); if (!pre) return;
   const stamp = new Date().toLocaleTimeString();
   const safe = (v)=> (v==null?'':String(v));
   const log = [
@@ -92,11 +101,13 @@ function logToConsole(rawText, parsed, note=''){
 const FORM_BASE='https://docs.google.com/forms/d/e/1FAIpQLSeo-xlOSxvG0IwtO5MkKaTJZNJkgTsmgZUw-FBsntFlNdRnCw/viewform?usp=pp_url';
 const ENTRY={date:'entry.1911996449',time:'entry.1421115881',lat:'entry.419288992',lon:'entry.113122688',ward:'entry.1625337207',beat:'entry.1058310891',addr:'entry.1188611077',ps:'entry.1555105834'};
 
-/* ---------- Static crop presets (unchanged) ---------- */
+/* ---------- Static crop (slightly relaxed left) ---------- */
 const STATIC_CROP={
   portrait:{ top:0.755,height:0.235,mapCut:0.205,pad:{top:0.020,bottom:0.018,left:0.028,right:0.024} },
   landscape:{ top:0.775,height:0.190,mapCut:0.185,pad:{top:0.016,bottom:0.014,left:0.022,right:0.020} }
 };
+const LEFT_RELAX = 0.030;
+
 async function cropHud(dataURL){
   const img=await loadImage(dataURL);
   const W=img.naturalWidth, H=img.naturalHeight;
@@ -108,7 +119,7 @@ async function cropHud(dataURL){
   sy = Math.max(0, sy - Math.floor(H*P.pad.top));
   sh = Math.min(H - sy, sh + Math.floor(H*(P.pad.top + P.pad.bottom)));
 
-  let sx=Math.floor(W*(P.mapCut+P.pad.left));
+  let sx=Math.floor(W*(P.mapCut + P.pad.left - LEFT_RELAX));
   let sw=W - sx - Math.floor(W*P.pad.right);
   if (sx<0) sx=0;
   if (sy<0) sy=0;
@@ -121,7 +132,7 @@ async function cropHud(dataURL){
   return c.toDataURL('image/png');
 }
 
-/* ---------- OCR preprocess (relaxed) ---------- */
+/* ---------- Preprocess (light) ---------- */
 async function preprocessForOCR(cropDataURL){
   const src=await loadImage(cropDataURL);
   const w=src.naturalWidth, h=src.naturalHeight;
@@ -147,37 +158,6 @@ async function preprocessForOCR(cropDataURL){
     const avg=(d[i]+d[i+1]+d[i+2])/3;
     const v = avg>140?255:0;
     d[i]=d[i+1]=d[i+2]=v; d[i+3]=255;
-  }
-  uctx.putImageData(im,0,0);
-
-  // light morphology
-  const W=up.width, H=up.height;
-  im = uctx.getImageData(0,0,W,H);
-  const pix=im.data;
-  const get=(x,y)=> pix[(y*W + x)*4];
-  const set=(x,y,v)=>{ const k=(y*W + x)*4; pix[k]=pix[k+1]=pix[k+2]=v; pix[k+3]=255; };
-  const copy1=new Uint8ClampedArray(pix.length); copy1.set(pix);
-  const get1=(x,y)=> copy1[(y*W + x)*4];
-  // dilate
-  for(let y=1;y<H-1;y++){
-    for(let x=1;x<W-1;x++){
-      let any=0;
-      for(let yy=-1;yy<=1 && !any;yy++)
-        for(let xx=-1;xx<=1;xx++)
-          if (get(x+xx,y+yy)===255){ any=1; break; }
-      const k=(y*W+x)*4;
-      copy1[k]=copy1[k+1]=copy1[k+2]= any?255:0; copy1[k+3]=255;
-    }
-  }
-  // erode
-  for(let y=1;y<H-1;y++){
-    for(let x=1;x<W-1;x++){
-      let all=1;
-      for(let yy=-1;yy<=1 && all;yy++)
-        for(let xx=-1;xx<=1;xx++)
-          if (get1(x+xx,y+yy)!==255){ all=0; break; }
-      const v=all?255:0; set(x,y,v);
-    }
   }
   uctx.putImageData(im,0,0);
 
@@ -229,11 +209,7 @@ async function handleFile(file){
     const res = await Tesseract.recognize(
       processed,
       'eng',
-      {
-        logger:()=>{},
-        tessedit_pageseg_mode: 6,
-        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789:+.,/°- '
-      }
+      { logger:()=>{}, tessedit_pageseg_mode:6, tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789:+.,/°- ' }
     );
     rawText = (res?.data?.text || '').trim();
     logToConsole(rawText, null, '[OCR complete]');
@@ -251,16 +227,14 @@ async function handleFile(file){
   }
   setPill('parse','ok');
 
-  // Normalize for Form prefill (the key change)
-  const { date: formDate, time: formTime } = normalizeForForm(parsed.date, parsed.time);
-
-  outDate && (outDate.textContent = formDate);
-  outTime && (outTime.textContent = formTime);
+  // Show parsed values (raw)
+  outDate && (outDate.textContent = parsed.date);
+  outTime && (outTime.textContent = parsed.time);
   outLat  && (outLat.textContent  = parsed.lat.toFixed(6));
   outLon  && (outLon.textContent  = parsed.lon.toFixed(6));
   outAddr && (outAddr.textContent = parsed.address);
 
-  // GeoJSON lookup (kept as in stable build)
+  // Geo
   setPill('geo','run');
   try{ await ensureGeo(); }catch{ setPill('geo','err'); banner('Failed to load GeoJSON.','error'); return; }
   const gj = geoLookup(parsed.lat, parsed.lon);
@@ -272,118 +246,127 @@ async function handleFile(file){
 
   setPill('review','ok');
 
-  // Redirect (uses normalized date/time)
+  // Normalize for prefill (YYYY-MM-DD / HH:mm 24h)
+  const { date: formDate, time: formTime } = normalizeFormRedirect(parsed.date, parsed.time);
+  outDate && (outDate.textContent = formDate);
+  outTime && (outTime.textContent = formTime);
+  logToConsole('', {date: formDate, time: formTime}, '[Prefill normalized → YYYY-MM-DD + HH:mm]');
+
+  // Build URL
   const url = new URL(FORM_BASE);
   url.searchParams.set(ENTRY.date, formDate);
   url.searchParams.set(ENTRY.time, formTime);
-  url.searchParams.set(ENTRY.lat, parsed.lat.toFixed(6));
-  url.searchParams.set(ENTRY.lon, parsed.lon.toFixed(6));
+  url.searchParams.set(ENTRY.lat,  parsed.lat.toFixed(6));
+  url.searchParams.set(ENTRY.lon,  parsed.lon.toFixed(6));
   url.searchParams.set(ENTRY.ward, gj.ward);
   url.searchParams.set(ENTRY.beat, gj.beat);
   url.searchParams.set(ENTRY.addr, parsed.address);
   url.searchParams.set(ENTRY.ps,   gj.ps);
 
+  lastRedirectUrl = url.toString();
+
   try{
     setPill('redirect','run');
-    window.open(url.toString(), '_blank', 'noopener');
+    window.open(lastRedirectUrl, '_blank', 'noopener');
     setPill('redirect','ok');
   }catch{
     setPill('redirect','err');
-    banner('Auto-redirect blocked. Use the button below.','error');
-    addManualRedirect(url.toString());
+    banner('Auto-redirect blocked. Tap the Redirect pill to open.', 'error');
+  }
+
+  // Make Redirect pill clickable + pulse
+  if (pills.redirect){
+    pills.redirect.classList.add('pulse','ok');
+    pills.redirect.onclick = () => { if (lastRedirectUrl) window.open(lastRedirectUrl, '_blank', 'noopener'); };
+    pills.redirect.title = 'Open Google Form';
   }
 }
 
-/* ---------- Parsing (garbage-filter + fuzzy dt) ---------- */
+/* ---------- Parsing ---------- */
 function parseHudText(raw){
   let lines = raw.split(/\n/).map(s=>s.trim()).filter(Boolean);
 
-  // Trim junk that appears before the location line
-  const locIdx = lines.findIndex(l => /(India|Maharashtra|Mumbai)/i.test(l));
+  // Start near location line if present
+  const locIdx = lines.findIndex(l => /(India|Maharashtra|Mumbai|Navi Mumbai)/i.test(l));
   if (locIdx > 0) lines = lines.slice(locIdx);
   if (lines.length < 3) return {};
 
-  const lastTwo = lines.slice(-2).join(' ');
   const last = lines[lines.length - 1];
   const prev = lines[lines.length - 2];
 
-  // Address is everything above the last 2 lines
+  // Address above the last 2 lines
   let addr  = lines.slice(0, lines.length - 2).join(', ');
-
-  // Lat/Lon extraction (robust)
-  const a = prev.replace(/[|]/g,' ').replace(/°/g,' ').replace(/,\s*/g,' ');
-  const m = a.match(/(-?\d{1,2}\.\d+).+?(-?\d{1,3}\.\d+)/);
-  let lat = NaN, lon = NaN;
-  if (m){ lat = parseFloat(m[1]); lon = parseFloat(m[2]); }
-
-  // Fuzzy date/time cleanup & parsing
-  let date = '', time = '';
-  let dt = lastTwo
-            .replace(/CMT/gi,'GMT')
-            .replace(/OV/gi,'08')
-            .replace(/O(?=\d)/g,'0');
-  let md =
-    dt.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{4}).*?(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i) ||
-    dt.match(/(\d{4}[\/-]\d{2}[\/-]\d{2}).*?(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i);
-  if (md) { date = md[1]; time = md[2].replace(/\s+/g,' ').trim(); }
-
-  // Address cleanup
   addr = addr
     .replace(/GPS\s*Map\s*Camera/gi,' ')
-    .replace(/[\[\(][^\]\)]*[\]\)]/g,' ')
-    .replace(/^[^\p{L}\p{N}]+/u,'')
-    .replace(/(?:^|,)\s*[^\p{L}\p{N}]+(?=,|$)/gu,'')
     .replace(/\s*,\s*,+/g,', ')
     .replace(/\s{2,}/g,' ')
     .replace(/^[,\s]+|[,\s]+$/g,'')
     .trim();
 
+  // Lat/Lon primary attempt from 'prev'
+  let lat = NaN, lon = NaN;
+  const scrubPrev = prev.replace(/[|]/g,' ').replace(/°/g,' ').replace(/,\s*/g,' ');
+  const m = scrubPrev.match(/(-?\d{1,2}\.\d+).+?(-?\d{1,3}\.\d+)/);
+  if (m){ lat = parseFloat(m[1]); lon = parseFloat(m[2]); }
+
+  // Fallback: scan whole raw for two decimals in Mumbai bounds (handles "L5t" etc.)
+  if (isNaN(lat) || isNaN(lon)) {
+    const allNums = (raw.match(/-?\d{1,3}\.\d+/g) || []).map(parseFloat);
+    for (let i=0;i<allNums.length-1;i++){
+      const a = allNums[i], b = allNums[i+1];
+      const latLike = (a>=17 && a<=21), lonLike = (b>=72 && b<=75);
+      if (latLike && lonLike){ lat=a; lon=b; break; }
+    }
+  }
+
+  // Date & Time
+  const pool = [last, `${prev} ${last}`];
+  let date = '', time = '';
+  for (const s of pool){
+    if (!date){
+      const m1 = s.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})/); // dd/mm/yyyy
+      const m2 = s.match(/(\d{4}[\/-]\d{1,2}[\/-]\d{1,2})/); // yyyy-mm-dd
+      if (m1) date = m1[1]; else if (m2) date = m2[1];
+    }
+    if (!time){
+      const t1 = s.match(/(\d{1,2}):(\d{2})\s*([AP]M)/i);   // 12h
+      const t2 = s.match(/(\d{1,2}):(\d{2})(?!\s*[AP]M)/i); // 24h
+      if (t1) time = `${t1[1]}:${t1[2]} ${t1[3].toUpperCase()}`;
+      else if (t2) time = `${t2[1]}:${t2[2]}`;
+    }
+  }
+
   return { address: addr, lat, lon, date, time };
 }
 
-/* ---------- Date/Time normalization for Google Forms ---------- */
+/* ---------- Prefill: YYYY-MM-DD & HH:mm (24h) ---------- */
 function pad2(n){ return n<10 ? '0'+n : String(n); }
-function toFormDate(dStr){
-  // Accepts dd/MM/yyyy, d/M/yyyy, yyyy-MM-dd, yyyy/MM/dd
-  let d,m,y;
-  let m1 = dStr.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/); // dd/MM/yyyy
-  let m2 = dStr.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/); // yyyy-MM-dd
-  if (m1){ d=+m1[1]; m=+m1[2]; y=+m1[3]; }
-  else if (m2){ y=+m2[1]; m=+m2[2]; d=+m2[3]; }
-  else { return dStr; } // fallback untouched
-  return `${pad2(d)}/${pad2(m)}/${y}`;
-}
-function toFormTime(tStr){
-  // Accepts "HH:mm" or "hh:mm AM/PM"
-  const m12 = tStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-  const m24 = tStr.match(/^(\d{1,2}):(\d{2})$/);
-  if (m12){
-    const hh = +m12[1], mm = m12[2];
-    const ap = m12[3].toUpperCase();
-    return `${pad2(hh)}:${mm} ${ap}`;
+function normalizeFormRedirect(dateStr, timeStr){
+  // DATE
+  let yyyy, mm, dd;
+  let m1 = (dateStr||'').match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/); // dd/mm/yyyy
+  let m2 = (dateStr||'').match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/); // yyyy-mm-dd
+  if (m1){ dd=+m1[1]; mm=+m1[2]; yyyy=+m1[3]; }
+  else if (m2){ yyyy=+m2[1]; mm=+m2[2]; dd=+m2[3]; }
+  const formDate = (yyyy && mm && dd) ? `${yyyy}-${pad2(mm)}-${pad2(dd)}` : (dateStr||'');
+
+  // TIME
+  let HH, Min;
+  const t12 = (timeStr||'').match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  const t24 = (timeStr||'').match(/^(\d{1,2}):(\d{2})$/);
+  if (t12){
+    let h = +t12[1]; Min = t12[2]; const ap = t12[3].toUpperCase();
+    if (ap === 'AM'){ HH = (h===12) ? 0 : h; }
+    else { HH = (h===12) ? 12 : h+12; }
+  } else if (t24){
+    HH = +t24[1]; Min = t24[2];
   }
-  if (m24){
-    let hh = +m24[1], mm = m24[2];
-    let ap = 'AM';
-    if (hh === 0){ hh = 12; ap = 'AM'; }
-    else if (hh === 12){ ap = 'PM'; }
-    else if (hh > 12){ hh -= 12; ap = 'PM'; }
-    return `${pad2(hh)}:${mm} ${ap}`;
-  }
-  // if string already contains AM/PM but spacing is weird, normalize spacing/case
-  if (/am|pm/i.test(tStr)){
-    return tStr.replace(/\s+/g,' ').trim().toUpperCase();
-  }
-  return tStr; // fallback untouched
-}
-function normalizeForForm(dateStr, timeStr){
-  return {
-    date: toFormDate(dateStr),
-    time: toFormTime(timeStr)
-  };
+  const formTime = (HH!=null && Min!=null) ? `${pad2(HH)}:${Min}` : (timeStr||'');
+
+  return { date: formDate, time: formTime };
 }
 
-/* ---------- Geo (kept minimal like stable build) ---------- */
+/* ---------- Geo ---------- */
 let gjW=null, gjB=null, gjP=null;
 async function ensureGeo(){
   if(gjW && gjB && gjP) return;
@@ -392,6 +375,8 @@ async function ensureGeo(){
     fetch('data/beats.geojson').then(r=>r.json()).then(j=> gjB=j),
     fetch('data/police_jurisdiction.geojson').then(r=>r.json()).then(j=> gjP=j)
   ]);
+  const geoBadge = $('geoBadge');
+  if (geoBadge) geoBadge.className = `badge ${ (gjW?.features&&gjB?.features&&gjP?.features) ? 'badge-ok glow' : 'badge-err glow' }`;
 }
 function inPoly(poly,[x,y]){
   let inside=false;
@@ -414,78 +399,9 @@ function geoLookup(lat, lon){
     : g?.type === 'MultiPolygon' ? g.coordinates.some(r => inPoly(r, pt))
     : false;
 
-  for (const f of gjW.features) {
-    if (inG(f.geometry)) {
-      out.ward = f.properties.WARD
-              ?? f.properties.NAME
-              ?? f.properties.ward_no
-              ?? f.properties.ward
-              ?? f.properties.name
-              ?? '';
-      break;
-    }
-  }
-  for (const f of gjB.features) {
-    if (inG(f.geometry)) {
-      out.beat = f.properties.BEAT_NO
-              ?? f.properties.NAME
-              ?? f.properties.beat_no
-              ?? f.properties.beat
-              ?? f.properties.name
-              ?? '';
-      break;
-    }
-  }
-  for (const f of gjP.features) {
-    if (inG(f.geometry)) {
-      out.ps = f.properties.PS_NAME
-            ?? f.properties.NAME
-            ?? f.properties.ps_name
-            ?? f.properties.PSNAME
-            ?? f.properties.name
-            ?? '';
-      break;
-    }
-  }
+  for (const f of gjW.features) { if (inG(f.geometry)) { out.ward = f.properties.WARD ?? f.properties.NAME ?? f.properties.name ?? ''; break; } }
+  for (const f of gjB.features) { if (inG(f.geometry)) { out.beat = f.properties.BEAT_NO ?? f.properties.NAME ?? f.properties.name ?? ''; break; } }
+  for (const f of gjP.features) { if (inG(f.geometry)) { out.ps   = f.properties.PS_NAME ?? f.properties.NAME ?? f.properties.name ?? ''; break; } }
+
   return out;
 }
-
-/* ---------- Manual redirect button ---------- */
-function addManualRedirect(url){
-  let btn=document.getElementById('manualRedirect');
-  if(btn) return;
-  btn=document.createElement('button');
-  btn.id='manualRedirect';
-  btn.className='btn btn-primary';
-  btn.style.marginTop='10px';
-  btn.textContent='Open Google Form';
-  btn.onclick=()=> window.open(url,'_blank','noopener');
-  const box = ensureConsoleBox();
-  if (box) box.parentNode.insertBefore(btn, box.nextSibling);
-}
-
-/* ---------- Console controls ---------- */
-document.addEventListener('DOMContentLoaded', () => {
-  const box = document.getElementById('console-box');
-  const toggle = document.getElementById('consoleToggle');
-  const copyBtn = document.getElementById('consoleCopy');
-  const pre = document.getElementById('console-pre');
-
-  if (toggle && box) {
-    toggle.addEventListener('click', () => {
-      box.classList.toggle('console-collapsed');
-      const expanded = !box.classList.contains('console-collapsed');
-      toggle.setAttribute('aria-expanded', String(expanded));
-      toggle.textContent = expanded ? 'Hide' : 'Show';
-    });
-  }
-  if (copyBtn && pre) {
-    copyBtn.addEventListener('click', async () => {
-      try {
-        await navigator.clipboard.writeText(pre.textContent || '');
-        const b = document.getElementById('banner');
-        if (b) { b.className = 'banner success'; b.hidden = false; b.textContent = 'Console copied to clipboard.'; setTimeout(() => (b.hidden = true), 1600); }
-      } catch (_) {}
-    });
-  }
-});

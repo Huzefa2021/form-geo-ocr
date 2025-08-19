@@ -4,47 +4,58 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Municipal Corporation of Greater Mumbai — Abandoned Vehicles (Marshal Upload)</title>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=2025.08.19.P.2.8" />
   <!-- Tesseract v5 (jsDelivr) -->
   <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script defer src="app.js?v=2025.08.19.P.2.8"></script>
 </head>
 <body>
 
-  <!-- Header -->
-  <header class="app-header">
-    <div class="hdr-left">
+<!-- Header -->
+<header class="app-header">
+  <!-- LEFT: MCGM logo + titles -->
+  <div class="hdr-left">
+    <div class="logo-left">
       <img class="mcgm-logo" src="https://www.mcgm.gov.in/com.mcgm.newframework/images/logo_V1.png" alt="MCGM">
-      <div class="hdr-title">
-        <div class="t1">Municipal Corporation of Greater Mumbai</div>
-        <div class="t2">Abandoned Vehicles — Identification &amp; Pre-Notice (Marshal Upload)</div>
-      </div>
     </div>
-    <div class="hdr-right">
+    <div class="hdr-title">
+      <div class="t1">Municipal Corporation of Greater Mumbai</div>
+      <div class="t2">Abandoned Vehicles — Identification &amp; Pre-Notice (Marshal Upload)</div>
+    </div>
+  </div>
+
+  <!-- RIGHT: badges, reset, Crescendo logo -->
+  <div class="hdr-right">
+    <div class="hdr-right-stack">
       <span id="cdnBadge" class="badge badge-info">CDN: v5 (Loading…)</span>
       <span id="geoBadge" class="badge badge-warn">Geo: Loading…</span>
       <button id="btnReset" class="btn btn-danger">Reset</button>
     </div>
-  </header>
 
-  <!-- Pills -->
+    <div class="logo-right">
+      <img class="crescendo-logo" src="data/crescendo-logo.png" alt="Crescendo Innovative Solutions">
+    </div>
+  </div>
+</header>
+
+  <!-- Sticky Pills -->
   <section id="pillBar" class="pillbar">
-    <button class="pill" id="pill-upload"><span>Upload</span><em>(0.0s)</em></button>
-    <button class="pill" id="pill-ocr"><span>OCR</span><em>(0.0s)</em></button>
-    <button class="pill" id="pill-parse"><span>Parse</span><em>(0.0s)</em></button>
-    <button class="pill" id="pill-geo"><span>GeoJSON</span><em>(0.0s)</em></button>
-    <button class="pill" id="pill-review"><span>Review</span><em>(0.0s)</em></button>
-    <button class="pill" id="pill-redirect"><span>Redirect</span><em>(0.0s)</em></button>
+    <button class="pill" id="pill-upload"><span>Upload</span></button>
+    <button class="pill" id="pill-ocr"><span>OCR</span></button>
+    <button class="pill" id="pill-parse"><span>Parse</span></button>
+    <button class="pill" id="pill-geo"><span>GeoJSON</span></button>
+    <button class="pill" id="pill-review"><span>Review</span></button>
+    <button class="pill" id="pill-redirect" title="Opens Google Form"><span>Redirect</span></button>
   </section>
 
-  <!-- Banner -->
+  <!-- Sticky Banner -->
   <div id="banner" class="banner info" hidden>Updates will appear here…</div>
 
-  <!-- Content -->
+  <!-- Main -->
   <main class="container">
     <div class="grid">
-      <!-- LEFT: Upload + big previews side-by-side -->
       <section class="card">
         <h3>Upload &amp; Previews</h3>
 
@@ -59,17 +70,16 @@
 
         <div class="preview-grid">
           <figure class="preview-col">
-            <figcaption>Original Preview (25%)</figcaption>
-            <img id="imgOriginal" class="preview-img preview-25" alt="Original Preview (25%)" />
+            <figcaption>Original Preview</figcaption>
+            <img id="imgOriginal" class="preview-img" alt="Original Preview" />
           </figure>
           <figure class="preview-col">
-            <figcaption>Cropped HUD Preview (50%)</figcaption>
-            <img id="imgCrop" class="preview-img preview-50" alt="Cropped HUD Preview (50%)" />
+            <figcaption>Cropped HUD Preview</figcaption>
+            <img id="imgCrop" class="preview-img" alt="Cropped HUD Preview" />
           </figure>
         </div>
       </section>
 
-      <!-- RIGHT: Results + Console + BBox debug -->
       <section class="card">
         <h3>Results</h3>
         <div class="results">
@@ -89,37 +99,24 @@
           <div class="console-head">
             <strong>Console Output</strong>
             <div class="console-actions">
-              <button id="consoleCopy" class="btn btn-primary btn-sm" type="button">Copy</button>
-              <button id="consoleToggle" class="btn btn-primary btn-sm" type="button" aria-expanded="true">Hide</button>
+              <button id="consoleCopy" class="btn btn-primary btn-xxs" type="button">Copy</button>
+              <button id="consoleToggle" class="btn btn-primary btn-xxs" type="button" aria-expanded="true">Hide</button>
             </div>
           </div>
           <pre id="console-pre" aria-live="polite">Logs will appear here…</pre>
-        </div>
-
-        <!-- BBox Debug Canvas -->
-        <div class="bbox-wrap card-inset">
-          <div class="console-head">
-            <strong>GeoJSON BBoxes</strong>
-            <span class="hint">Overview of polygon bounds + hit point</span>
-          </div>
-          <canvas id="geoCanvas" width="600" height="380" class="bbox-canvas"></canvas>
         </div>
       </section>
     </div>
   </main>
 
-  <!-- Sticky Footer (center text) -->
-  <footer class="app-footer">
-    <div class="ftext">
-      © 2025 Municipal Corporation of Greater Mumbai (MCGM) —
-      Developed by <strong>Crescendo Innovative Solutions LLP</strong> ·
-      Admin: <a href="mailto:Care@crescendoits.com">Care@crescendoits.com</a> ·
-      <a href="https://www.mcgm.gov.in" target="_blank" rel="noreferrer">www.mcgm.gov.in</a> ·
-      <span id="buildId">Build: v2025.08.18.Prod</span>
-    </div>
-  </footer>
-
-  <!-- App -->
-  <script defer src="app.js"></script>
+  <!-- Sticky Footer -->
+<footer class="app-footer">
+  <div class="ftext">
+    <div>© 2025 <strong>Municipal Corporation of Greater Mumbai (MCGM)</strong></div>
+    <div>Developed by <strong>Crescendo Innovative Solutions LLP</strong></div>
+    <div>Admin: <strong>Huzefa Kathawala</strong> · <a href="mailto:huzefa.k@crescendoits.com">huzefa.k@crescendoits.com</a></div>
+    <div><span id="buildId">Build: v2025.08.19.Prod</span></div>
+  </div>
+</footer>
 </body>
 </html>
