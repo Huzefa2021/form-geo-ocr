@@ -152,18 +152,94 @@ async function preprocessForOCR(cropDataURL){
   return up.toDataURL('image/png');
 }
 
-/* ---------- Drag & drop ---------- */
-dropArea?.addEventListener('click',()=>fileInput?.click());
-dropArea?.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' ') fileInput?.click(); });
-fileInput?.addEventListener('click',e=>{ e.target.value=''; });
-fileInput?.addEventListener('change',e=>{ const f=e.target.files?.[0]; if(f) handleFile(f); });
-['dragenter','dragover'].forEach(t=> dropArea?.addEventListener(t, e=>{ e.preventDefault(); dropArea.classList.add('dragover'); }));
-['dragleave','drop'].forEach(t=> dropArea?.addEventListener(t, e=>{ e.preventDefault(); dropArea.classList.remove('dragover'); }));
-dropArea?.addEventListener('drop', e=>{
-  const f=[...(e.dataTransfer?.files||[])].find(x=>/^image\//i.test(x.type));
-  if (f) handleFile(f);
+/* ---------- Drag & drop (macOS/Safari-safe) ---------- */
+
+// 1) Stop the browser from navigating away when a file is dropped anywhere.
+['dragover','drop'].forEach(ev =>
+  window.addEventListener(ev, e => { e.preventDefault(); }, { passive:false })
+);
+
+// 2) Utility to extract a File from DataTransfer, preferring images (uses items for Safari)
+function pickFileFromDataTransfer(dt){
+  if (!dt) return null;
+
+  // Prefer items (Safari-friendly)
+  if (dt.items && dt.items.length){
+    for (const it of dt.items){
+      if (it.kind === 'file'){
+        const f = it.getAsFile();
+        if (f && /^image\//i.test(f.type)) return f;   // image first
+      }
+    }
+    // Fallback: take the first file item if no explicit image type matched
+    for (const it of dt.items){
+      if (it.kind === 'file'){
+        const f = it.getAsFile();
+        if (f) return f;
+      }
+    }
+  }
+
+  // Fallback to files list
+  if (dt.files && dt.files.length){
+    return [...dt.files].find(x=>/^image\//i.test(x.type)) || dt.files[0];
+  }
+
+  return null;
+}
+
+// 3) Visual affordances
+['dragenter','dragover'].forEach(t => dropArea?.addEventListener(t, e=>{
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+  dropArea.classList.add('dragover');
+}));
+['dragleave','drop'].forEach(t => dropArea?.addEventListener(t, e=>{
+  e.preventDefault();
+  dropArea.classList.remove('dragover');
+}));
+
+// 4) Click/keyboard to open file picker
+dropArea?.addEventListener('click', ()=> fileInput?.click());
+dropArea?.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') fileInput?.click();
 });
-$('btnReset')?.addEventListener('click',()=> location.reload());
+
+// 5) Make re-selecting the same file re-trigger change
+fileInput?.addEventListener('click', e => { e.target.value = ''; });
+
+// 6) Handle file chooser
+fileInput?.addEventListener('change', e => {
+  const f = e.target.files?.[0];
+  if (f) acceptAndHandleFile(f);
+});
+
+// 7) Handle drop
+dropArea?.addEventListener('drop', e => {
+  const f = pickFileFromDataTransfer(e.dataTransfer);
+  if (f) acceptAndHandleFile(f);
+});
+
+// 8) Central acceptance + HEIC handling
+async function acceptAndHandleFile(file){
+  // Some Macs produce HEIC; Safari may read it, but canvas/other browsers won’t.
+  const isHeic = /image\/hei[cf]|\.heic$/i.test(file.type) || /\.heic$/i.test(file.name || '');
+
+  if (isHeic){
+    banner('HEIC detected. Please export as JPG/PNG from Photos (File → Export) or change camera format (Most Compatible).', 'error');
+    setPill('upload', 'err');
+    return;
+  }
+
+  if (!/^image\/(jpe?g|png|gif|bmp|webp)$/i.test(file.type)){
+    banner('Please choose an image (JPG/PNG).', 'error');
+    setPill('upload', 'err');
+    return;
+  }
+
+  // proceed
+  handleFile(file);
+}
 
 /* ---------- Main flow ---------- */
 async function handleFile(file){
