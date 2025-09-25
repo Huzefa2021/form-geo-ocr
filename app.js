@@ -414,10 +414,20 @@ function geoLookup(lat, lon){
   for (const f of gjB.features) {
     if (inG(f.geometry)) {
       const p = f.properties || {};
-      const ward = p.WARD ?? p.WARD_NAME ?? p.ward ?? p.NAME ?? p.name ?? '';
-      const beat = p.BEAT_NO ?? p.BEAT ?? p.beat ?? p.NAME ?? p.name ?? '';
-      out.ward = String(ward).trim();
-      out.beat = String(beat).trim();
+
+      // Pull ward from common keys, now including "description"
+      const wardRaw = p.WARD ?? p.WARD_NAME ?? p.ward ?? p.description ?? p.DESCRIPTION ?? p.NAME ?? p.name ?? '';
+      // Pull beat from common keys; prefer explicit beat fields, else Name/name
+      let beatRaw = p.BEAT_NO ?? p.BEAT ?? p.beat ?? p.NAME ?? p.Name ?? p.name ?? '';
+
+      // Optional: if Name contains patterns like "BEAT 1", keep it tidy
+      if (!p.BEAT_NO && !p.BEAT && typeof beatRaw === 'string') {
+        const m = beatRaw.match(/BEAT\s*\w+/i);
+        if (m) beatRaw = m[0]; // e.g., "BEAT 1"
+      }
+
+      out.ward = String(wardRaw).trim();             // e.g., "R/N"
+      out.beat = String(beatRaw).trim();             // e.g., "BEAT 1"
       break;
     }
   }
