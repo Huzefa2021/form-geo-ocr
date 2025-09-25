@@ -1,12 +1,9 @@
 /* ==========================================================
    Abandoned Vehicles — Marshal Upload (MCGM)
-   Build: v2025.08.19.P.2.8
-   - Logos: handled via CSS (72px)
-   - Indicators smaller/responsive (CSS)
-   - Sticky header/pills/banner remain visible
-   - Redirect pill pulses & is clickable (no console link)
-   - Parsing: robust Lat/Lon fallback for OCR noise
-   - Prefill: DATE=YYYY-MM-DD, TIME=HH:mm (24h)
+   Build: v2025.09.25.M1
+   - Single GeoJSON for Beats that also contains Ward info
+   - Police jurisdiction GeoJSON kept separate
+   - Robust OCR + parsing + prefill normalization
    ========================================================== */
 
 const $ = (id) => document.getElementById(id);
@@ -34,16 +31,7 @@ const pills = {
   review: $('pill-review'),
   redirect: $('pill-redirect'),
 };
-/*
-const cdnBadge = document.getElementById('cdnBadge');
-const geoBadge = document.getElementById('geoBadge');
 
-function setBadge(badgeEl, stateText, stateClass) {
-  // stateClass: 'badge-info' | 'badge-ok' | 'badge-warn' | 'badge-error'
-  badgeEl.textContent = stateText;
-  badgeEl.className = `badge ${stateClass}`;
-}
-*/
 let lastRedirectUrl = '';
 
 /* ---------- Badges ---------- */
@@ -101,7 +89,7 @@ function logToConsole(rawText, parsed, note=''){
 const FORM_BASE='https://docs.google.com/forms/d/e/1FAIpQLSeo-xlOSxvG0IwtO5MkKaTJZNJkgTsmgZUw-FBsntFlNdRnCw/viewform?usp=pp_url';
 const ENTRY={date:'entry.1911996449',time:'entry.1421115881',lat:'entry.419288992',lon:'entry.113122688',ward:'entry.1625337207',beat:'entry.1058310891',addr:'entry.1188611077',ps:'entry.1555105834'};
 
-/* ---------- Static crop (slightly relaxed left) ---------- */
+/* ---------- Static crop ---------- */
 const STATIC_CROP={
   portrait:{ top:0.755,height:0.235,mapCut:0.205,pad:{top:0.020,bottom:0.018,left:0.028,right:0.024} },
   landscape:{ top:0.775,height:0.190,mapCut:0.185,pad:{top:0.016,bottom:0.014,left:0.022,right:0.020} }
@@ -309,7 +297,7 @@ function parseHudText(raw){
   const m = scrubPrev.match(/(-?\d{1,2}\.\d+).+?(-?\d{1,3}\.\d+)/);
   if (m){ lat = parseFloat(m[1]); lon = parseFloat(m[2]); }
 
-  // Fallback: scan whole raw for two decimals in Mumbai bounds (handles "L5t" etc.)
+  // Fallback: scan whole raw for two decimals in Mumbai bounds
   if (isNaN(lat) || isNaN(lon)) {
     const allNums = (raw.match(/-?\d{1,3}\.\d+/g) || []).map(parseFloat);
     for (let i=0;i<allNums.length-1;i++){
@@ -366,18 +354,32 @@ function normalizeFormRedirect(dateStr, timeStr){
   return { date: formDate, time: formTime };
 }
 
-/* ---------- Geo ---------- */
-let gjW=null, gjB=null, gjP=null;
+/* ---------- Geo (Single Beats + Ward, plus Police) ---------- */
+let gjB=null, gjP=null;
+
+/**
+ * ensureGeo()
+ * Loads:
+ * - data/beats.geojson  → features include both Beat & Ward in properties
+ * - data/police_jurisdiction.geojson
+ */
 async function ensureGeo(){
-  if(gjW && gjB && gjP) return;
-  await Promise.all([
-    fetch('data/wards.geojson').then(r=>r.json()).then(j=> gjW=j),
-    fetch('data/beats.geojson').then(r=>r.json()).then(j=> gjB=j),
-    fetch('data/police_jurisdiction.geojson').then(r=>r.json()).then(j=> gjP=j)
+  if(gjB && gjP) return;
+  const [beats, police] = await Promise.all([
+    fetch('data/beats.geojson').then(r=>{ if(!r.ok) throw new Error('beats.geojson'); return r.json(); }),
+    fetch('data/police_jurisdiction.geojson').then(r=>{ if(!r.ok) throw new Error('police_jurisdiction.geojson'); return r.json(); })
   ]);
+  gjB = beats; gjP = police;
+
   const geoBadge = $('geoBadge');
-  if (geoBadge) geoBadge.className = `badge ${ (gjW?.features&&gjB?.features&&gjP?.features) ? 'badge-ok glow' : 'badge-err glow' }`;
+  if (geoBadge) {
+    const ok = (gjB?.features?.length>0) && (gjP?.features?.length>0);
+    geoBadge.className = `badge ${ ok ? 'badge-ok glow' : 'badge-err glow' }`;
+    geoBadge.textContent = ok ? 'Geo: Ready' : 'Geo: Error';
+  }
 }
+
+/* Point-in-polygon (ray casting) */
 function inPoly(poly,[x,y]){
   let inside=false;
   for(const ring of poly){
@@ -390,18 +392,67 @@ function inPoly(poly,[x,y]){
   }
   return inside;
 }
+
+/**
+ * geoLookup(lat, lon)
+ * Returns { ward, beat, ps }
+ * - Ward & Beat from gjB (single merged file)
+ * - Police Station from gjP
+ * Property fallbacks included for robustness.
+ */
 function geoLookup(lat, lon){
   const out = { ward:'', beat:'', ps:'' };
-  if (!gjW || !gjB || !gjP) return out;
+  if (!gjB || !gjP) return out;
+
   const pt = [lon, lat];
   const inG = (g) =>
     g?.type === 'Polygon' ? inPoly(g.coordinates, pt)
     : g?.type === 'MultiPolygon' ? g.coordinates.some(r => inPoly(r, pt))
     : false;
 
-  for (const f of gjW.features) { if (inG(f.geometry)) { out.ward = f.properties.WARD ?? f.properties.NAME ?? f.properties.name ?? ''; break; } }
-  for (const f of gjB.features) { if (inG(f.geometry)) { out.beat = f.properties.BEAT_NO ?? f.properties.NAME ?? f.properties.name ?? ''; break; } }
-  for (const f of gjP.features) { if (inG(f.geometry)) { out.ps   = f.properties.PS_NAME ?? f.properties.NAME ?? f.properties.name ?? ''; break; } }
+  // Beats (with Ward embedded)
+  for (const f of gjB.features) {
+    if (inG(f.geometry)) {
+      const p = f.properties || {};
+      const ward = p.WARD ?? p.WARD_NAME ?? p.ward ?? p.NAME ?? p.name ?? '';
+      const beat = p.BEAT_NO ?? p.BEAT ?? p.beat ?? p.NAME ?? p.name ?? '';
+      out.ward = String(ward).trim();
+      out.beat = String(beat).trim();
+      break;
+    }
+  }
+
+  // Police
+  for (const f of gjP.features) {
+    if (inG(f.geometry)) {
+      const p = f.properties || {};
+      out.ps = String(p.PS_NAME ?? p.NAME ?? p.name ?? p.police ?? '').trim();
+      break;
+    }
+  }
 
   return out;
 }
+
+/* ---------- Console buttons ---------- */
+document.addEventListener('DOMContentLoaded', () => {
+  const copyBtn = document.getElementById('consoleCopy');
+  const toggleBtn = document.getElementById('consoleToggle');
+  const pre = document.getElementById('console-pre');
+
+  copyBtn?.addEventListener('click', () => {
+    if (!pre) return;
+    navigator.clipboard.writeText(pre.textContent || '').then(() => {
+      banner('Console copied.', 'success');
+      setTimeout(()=>banner('', ''), 1200);
+    });
+  });
+
+  toggleBtn?.addEventListener('click', () => {
+    if (!pre) return;
+    const hidden = pre.style.display === 'none';
+    pre.style.display = hidden ? '' : 'none';
+    toggleBtn.setAttribute('aria-expanded', String(hidden));
+    toggleBtn.textContent = hidden ? 'Hide' : 'Show';
+  });
+});
