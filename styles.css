@@ -1,6 +1,6 @@
 :root{
-  --blue:#0f5281;           /* MCGM header blue */
-  --gold:#d4a017;           /* MCGM gold accent */
+  --blue:#0f5281;
+  --gold:#d4a017;
   --surface:#f6f8fc;
   --card:#ffffff;
   --text:#1d2433;
@@ -16,7 +16,7 @@
   --e3:0 18px 48px rgba(10,14,29,.14);
 
   --footer-h: 72px;
-  --hdr-h: 88px; /* sticky header height anchor */
+  --hdr-h: 88px;
 }
 
 *{box-sizing:border-box}
@@ -30,29 +30,28 @@ body{
 
 /* Header */
 .app-header{
-  position:sticky;top:0;z-index:100;
-  display:flex;justify-content:space-between;align-items:center;gap:12px;
+  position:sticky;top:0;z-index:1000;
+  display:flex;justify-content:space-between;align-items:center;gap:16px;
   padding:10px 14px;background:var(--blue);color:#fff;
   border-bottom:5px solid var(--gold);
   box-shadow:0 10px 24px rgba(0,0,0,.15);
   min-height:var(--hdr-h);
 }
-.hdr-left{display:flex;gap:10px;align-items:center;min-width:0}
-.hdr-title .t1{font-weight:800;letter-spacing:.2px;font-size:clamp(15px,4.6vw,20px)}
-.hdr-title .t2{opacity:.95;font-size:clamp(12px,3.6vw,14px)}
+.hdr-left{display:flex;gap:14px;align-items:center;min-width:0}
+.hdr-title .t1{font-weight:800;letter-spacing:.2px;font-size:clamp(1rem,2.3vw,1.35rem)}
+.hdr-title .t2{opacity:.95;font-size:clamp(.80rem,1.9vw,1rem)}
 
-.logo-pill{
-  background:#fff;border-radius:14px;padding:6px 8px;
+.logo-left,.logo-right{
+  background:#fff;border-radius:14px;padding:6px 10px;
   display:flex;align-items:center;justify-content:center;
-  box-shadow:0 8px 22px rgba(212,160,23,.30), inset 0 0 0 2px rgba(212,160,23,.14);
+  box-shadow:0 0 14px rgba(255, 204, 0, 0.6);
 }
-.mcgm-logo{height:72px;object-fit:contain;display:block}
-.cres-logo{height:72px;object-fit:contain;display:block}
+.mcgm-logo,.crescendo-logo{height:72px;object-fit:contain;display:block}
 
-.hdr-right{display:flex;align-items:flex-start;gap:10px}
-.hdr-right-stack{display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+.hdr-right{display:flex;align-items:flex-start;gap:16px}
+.hdr-right-stack{display:flex;flex-direction:column;gap:8px;align-items:flex-end}
 
-/* Badges & Buttons: smaller, subtle with glow */
+/* Badges & Buttons */
 .badge{
   display:inline-block;padding:4px 8px;border-radius:10px;font-weight:800;
   font-size:clamp(10px,2.9vw,12px);
@@ -76,7 +75,7 @@ body{
 
 /* Pill bar (sticky under header) */
 .pillbar{
-  position:sticky;top:calc(var(--hdr-h) - 2px);z-index:95;
+  position:sticky;top:calc(var(--hdr-h) - 2px);z-index:950;
   display:flex;gap:8px;align-items:center;flex-wrap:wrap;
   padding:10px 12px;background:#fff;border-bottom:2px solid var(--gold);
   box-shadow:var(--e1);
@@ -97,9 +96,9 @@ body{
   100%{box-shadow:0 0 0 3px rgba(39,174,96,.16)}
 }
 
-/* Banner (sticky under pills) */
+/* Banner */
 .banner{
-  position:sticky;top:calc(var(--hdr-h) + 46px);z-index:90;margin:10px 12px;padding:12px 14px;border-radius:12px;
+  position:sticky;top:calc(var(--hdr-h) + 46px);z-index:900;margin:10px 12px;padding:12px 14px;border-radius:12px;
   font-weight:800;box-shadow:var(--e1);border:1px solid var(--line);background:#fffdf3;color:#5b4200
 }
 .banner.error{background:#fff1f1;color:#7b2121;border-color:#ffc9c9}
@@ -158,90 +157,29 @@ body{
   font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:.84rem;min-height:140px
 }
 
-/* Footer (sticky) */
+/* Footer */
 .app-footer{
-  position:fixed;bottom:0;left:0;width:100%;z-index:100;
+  position:fixed;bottom:0;left:0;width:100%;z-index:1000;
   border-top:5px solid var(--gold);background:var(--blue);color:#fff;
   padding:10px 14px;display:flex;justify-content:center;align-items:center;
   box-shadow:var(--e3);height:var(--footer-h);text-align:center
 }
-.app-footer .ftext{font-size:.95rem;line-height:1.4}
+.app-footer .ftext{
+  font-size:clamp(.7rem,1.6vw,.9rem);
+  line-height:1.5;
+}
+.app-footer strong{color:#ffd28c}
 
 /* Responsive */
 @media (max-width:980px){
   .grid{grid-template-columns:1fr}
-  .mcgm-logo,.cres-logo{height:72px}
+  .mcgm-logo,.crescendo-logo{height:72px}
   .hdr-right-stack{align-items:flex-end}
 }
 @media (max-width:560px){
   .preview-col{min-height:260px}
   .preview-img{max-height:240px}
 }
-
-/* Logo alignment + glow */
-.logo-wrap {
-  display:flex;
-  gap:14px;
-  align-items:center;
-  background:#fff;
-  border-radius:12px;
-  padding:6px 10px;
-  box-shadow:0 0 12px rgba(255, 204, 0, 0.6); /* golden glow */
+@media (max-width:420px){
+  .mcgm-logo,.crescendo-logo{height:60px}
 }
-.mcgm-logo, .crescendo-logo {
-  height:72px;
-  object-fit:contain;
-}
-
-/* Responsive typography */
-.hdr-title .t1 { font-size: clamp(1rem, 2vw, 1.2rem); }
-.hdr-title .t2 { font-size: clamp(0.8rem, 1.6vw, 1rem); }
-.badge, .btn { font-size: clamp(0.65rem, 1.5vw, 0.9rem); }
-
-/* Footer adjustments */
-.app-footer .ftext {
-  font-size: clamp(0.7rem, 1.6vw, 0.9rem);
-  line-height:1.5;
-}
-.app-footer strong { color:#ffd28c; }  /* golden bold text */
-
-/* Header layout: left (MCGM), right (badges + Crescendo) */
-.app-header {
-  position: sticky; top: 0; z-index: 1000;
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 16px;
-}
-
-/* Left cluster: MCGM + titles */
-.hdr-left { display: flex; align-items: center; gap: 14px; min-width: 0; }
-.logo-left {
-  background:#fff; border-radius:14px; padding:6px 10px;
-  box-shadow:0 0 14px rgba(255, 204, 0, 0.6);
-  display:flex; align-items:center; justify-content:center;
-}
-.mcgm-logo { height:72px; width:auto; object-fit:contain; }
-
-/* Titles responsive */
-.hdr-title .t1 { font-size: clamp(1.0rem, 2.3vw, 1.35rem); font-weight: 700; }
-.hdr-title .t2 { font-size: clamp(0.80rem, 1.9vw, 1.0rem); opacity: .95; }
-
-/* Right cluster: stacked badges + reset, Crescendo on far right */
-.hdr-right { display:flex; align-items:center; gap:16px; }
-.hdr-right-stack { display:flex; flex-direction:column; gap:8px; align-items:flex-end; }
-
-/* Right-side Crescendo logo with same treatment */
-.logo-right {
-  background:#fff; border-radius:14px; padding:6px 10px;
-  box-shadow:0 0 14px rgba(255, 204, 0, 0.6);
-  display:flex; align-items:center; justify-content:center;
-}
-.crescendo-logo { height:72px; width:auto; object-fit:contain; }
-
-/* Badges/buttons scale a bit on small screens */
-.badge, .btn { font-size: clamp(0.65rem, 1.6vw, 0.9rem); }
-
-/* Optional: tighten header on very narrow screens */
-@media (max-width: 420px) {
-  .mcgm-logo, .crescendo-logo { height:60px; }
-}
-
