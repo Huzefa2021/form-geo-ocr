@@ -1,19 +1,20 @@
 /* ==========================================================
    Abandoned Vehicles — Marshal Upload (MCGM)
-   Build: v2025.09.25.M1
+   Build: v2025.09.25.M1.OCRSpace
+   - OCR via OCR.Space (cloud) with optional Tesseract fallback
    - Single GeoJSON for Beats that also contains Ward info
    - Police jurisdiction GeoJSON kept separate
-   - Robust OCR + parsing + prefill normalization
-   - new ocr engine
+   - Robust parsing + prefill normalization (YYYY-MM-DD / HH:mm)
    ========================================================== */
 
 const $ = (id) => document.getElementById(id);
 
-/* ---------- OCR Engine Toggle ---------- */
-// If you want OCR.Space, set true and put your key below
-const USE_OCR_SPACE = true;
-// ← (Optional) drop your key here; or keep empty and read from env/secret manager
-const OCR_SPACE_API_KEY = 'K86010114388957'; // provided earlier; replace if needed
+/* ---------- OCR Engine Toggle & Config ---------- */
+const USE_OCR_SPACE = true; // set false to use Tesseract fallback
+const OCR_SPACE_API_KEY = 'K86010114388957'; // your key
+// Note: OCR.Space primary language code is typically "eng". Multi-language may vary by plan.
+// You can experiment with 'eng,hin' if your plan supports it.
+const OCR_SPACE_LANGUAGE = 'eng'; // keep 'eng' stable; adjust if needed
 
 /* ---------- Google Form Mapping ---------- */
 const FORM_BASE = 'https://docs.google.com/forms/d/e/1FAIpQLSeo-xlOSxvG0IwtO5MkKaTJZNJkgTsmgZUw-FBsntFlNdRnCw/viewform?usp=pp_url';
@@ -222,7 +223,7 @@ async function handleFile(file){
         headers: { 'apikey': OCR_SPACE_API_KEY },
         body: new URLSearchParams({
           base64Image: processed,
-          language: 'eng+hin+mar',
+          language: OCR_SPACE_LANGUAGE,
           isOverlayRequired: 'false',
           scale: 'true',
           OCREngine: '3'
@@ -234,7 +235,7 @@ async function handleFile(file){
       logToConsole(rawText, null, '[OCR.Space complete]');
     } else {
       if(!(window.Tesseract && Tesseract.recognize)) throw new Error('Tesseract not loaded');
-      const res = await Tesseract.recognize(processed,'eng+hin+mar',{ logger:()=>{}, tessedit_pageseg_mode:6 });
+      const res = await Tesseract.recognize(processed,'eng',{ logger:()=>{}, tessedit_pageseg_mode:6 });
       rawText = (res?.data?.text || '').trim();
       logToConsole(rawText, null, '[Tesseract complete]');
     }
@@ -397,10 +398,6 @@ async function ensureGeo(){
   if (gjB && gjP) return;
   try{
     setGeoBadge('load');
-    // Beats with Ward properties (e.g., BEAT_NO & WARD inside one file)
-    // Keep the filename the same as your deployed dataset:
-    // - beats.geojson  (must include Ward attribute)
-    // - police_jurisdiction.geojson
     const [b, p] = await Promise.all([
       fetch('data/beats.geojson').then(r=>r.json()),
       fetch('data/police_jurisdiction.geojson').then(r=>r.json()),
@@ -522,8 +519,4 @@ function addManualRedirect(url){
   btn.onclick=()=> window.open(url,'_blank','noopener');
   const box = document.getElementById('console-box');
   if (box) box.parentNode.insertBefore(btn, box.nextSibling);
-}
-
-/* ==========================================================
-   END: all wiring is compatible with existing index/styles
-   ========================================================== */
+     }
