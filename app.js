@@ -1,9 +1,13 @@
 /* ==========================================================
    Abandoned Vehicles — Marshal Upload (MCGM)
-   Build: v2025.10.04.R5  (OCR.Space → Tesseract fallback, multipart, robust parse)
-   Notes:
-   - UI/UX unchanged: uses existing IDs, pills, console, badges.
-   - If OCR.Space fetch fails or returns empty, Tesseract runs automatically.
+   Build: v2025.10.04.R6
+
+   - Adaptive HUD crop (portrait/landscape, cushioned)
+   - OCR.Space (multipart) with ≤1MB auto-compression
+   - Fallback to Tesseract when OCR.Space fails/blocked/empty
+   - Robust parsing (lat/lon w/ missing dot, flexible time)
+   - Prefill normalization (YYYY-MM-DD, HH:mm 24h)
+   - UI/UX unchanged: same element IDs, pills, console
    ========================================================== */
 
 /* ------------------------ Tweakables ------------------------ */
@@ -12,11 +16,12 @@ const CROP = {
   landscape: { top: 0.70, height: 0.28, left: 0.04, width: 0.92 }
 };
 
-// Embed key here (or set window.OCRSPACE_API_KEY in index.html before this script)
+// Embed key here or define window.OCRSPACE_API_KEY in index.html before this script
 const OCRSPACE_API_KEY = (window.OCRSPACE_API_KEY || 'K86010114388957');
 const OCRSPACE_ENGINE  = 2;
 const OCRSPACE_LANG    = 'eng';
 
+// Google Form mapping
 const FORM_BASE =
   'https://docs.google.com/forms/d/e/1FAIpQLSeo-xlOSxvG0IwtO5MkKaTJZNJkgTsmgZUw-FBsntFlNdRnCw/viewform?usp=pp_url';
 const ENTRY = {
@@ -140,15 +145,14 @@ async function handleFile(file) {
   imgOriginal.src = dataURL;
   setPill('upload', 'ok');
 
-  // Crop HUD (portrait vs landscape, with cushion)
+  // Crop HUD
   setPill('ocr', 'run');
   const cropCanvas = await cropHudToCanvas(dataURL);
   imgCrop.src = cropCanvas.toDataURL('image/png');
 
-  // ---- OCR.Space (multipart). If fetch fails, silently fall back to Tesseract. ----
+  // Try OCR.Space (multipart, ≤1MB)
   let rawText = '';
   let usedEngine = 'OCR.Space';
-
   try {
     if (OCRSPACE_API_KEY) {
       const os = await ocrSpaceRecognizeFromCanvas(cropCanvas, {
@@ -162,11 +166,11 @@ async function handleFile(file) {
       logToConsole('', { info: 'No OCR.Space key; using Tesseract' }, '[OCR.Space skipped]');
     }
   } catch (err) {
-    // Network/CORS/Server error — don’t block, just fall back
+    // Network/CORS/server errors → fallback
     logToConsole('', { error: String(err) }, '[OCR.Space error]');
   }
 
-  // Fallback if OCR.Space didn’t produce usable text
+  // Fallback to Tesseract if OCR.Space empty/failed
   if (!rawText || rawText.trim().length < 10) {
     try {
       usedEngine = 'Tesseract';
@@ -195,9 +199,9 @@ async function handleFile(file) {
   }
   setPill('parse', 'ok');
 
-  // UI fill
-  outDate.textContent = parsed.date;            // normalized YYYY-MM-DD
-  outTime.textContent = parsed.time;            // normalized 24h HH:mm
+  // Fill UI
+  outDate.textContent = parsed.date;
+  outTime.textContent = parsed.time;
   outLat.textContent  = parsed.lat.toFixed(6);
   outLon.textContent  = parsed.lon.toFixed(6);
   outAddr.textContent = parsed.address;
@@ -235,7 +239,7 @@ async function handleFile(file) {
   }
 }
 
-/* ------------------------ Crop (static + cushions) ------------------------ */
+/* ------------------------ Crop (adaptive + cushions) ------------------------ */
 async function cropHudToCanvas(dataURL) {
   const img = await loadImage(dataURL);
   const W = img.naturalWidth  || img.width;
@@ -253,20 +257,72 @@ async function cropHudToCanvas(dataURL) {
   c.width = sw; c.height = sh;
   const ctx = c.getContext('2d');
 
-  // Gentle filter helps both engines without overdoing preprocessing
+  // Gentle filter helps both engines
   ctx.filter = 'grayscale(1) contrast(170%) brightness(110%)';
   ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
   ctx.filter = 'none';
 
+  // Optional: cap very large crops before OCR to speed up
+  const MAX_W = 1400;
+  if (c.width > MAX_W) return downscaleCanvas(c, MAX_W);
   return c;
 }
 
-/* ------------------------ OCR.Space (multipart) ------------------------ */
-async function ocrSpaceRecognizeFromCanvas(cropCanvas, { apiKey, lang = 'eng', engine = 2 } = {}) {
-  if (!apiKey) return { rawText: '' }; // caller will fallback to Tesseract
+/* ------------------------ Canvas scaling + compression ------------------------ */
+function downscaleCanvas(srcCanvas, maxWidth = 1200) {
+  const sw = srcCanvas.width, sh = srcCanvas.height;
+  if (sw <= maxWidth) return srcCanvas;
+  const scale = maxWidth / sw;
+  const dw = Math.round(sw * scale);
+  const dh = Math.round(sh * scale);
+  const d = document.createElement('canvas');
+  d.width = dw; d.height = dh;
+  const ctx = d.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(srcCanvas, 0, 0, dw, dh);
+  return d;
+}
+async function compressCanvasToBlob(canvas, {
+  maxBytes = 1024 * 1024,      // 1 MB
+  maxWidth = 1200,             // width cap
+  minQuality = 0.5,
+  startQuality = 0.85,
+  scaleStep = 0.85
+} = {}) {
+  let work = downscaleCanvas(canvas, maxWidth);
+  let q = startQuality;
+  let blob = await new Promise(res => work.toBlob(res, 'image/jpeg', q));
+  let attempts = 0;
 
-  const blob = await new Promise(res => cropCanvas.toBlob(res, 'image/png', 1.0));
-  const file = new File([blob], 'hud.png', { type: 'image/png' });
+  while (blob && blob.size > maxBytes && attempts < 10) {
+    if (q > minQuality + 0.05) {
+      q = Math.max(minQuality, q - 0.1);
+    } else {
+      const dw = Math.max(Math.round(work.width * scaleStep), 600);
+      work = downscaleCanvas(work, dw);
+      q = startQuality;
+    }
+    blob = await new Promise(res => work.toBlob(res, 'image/jpeg', q));
+    attempts++;
+  }
+  return { blob, quality: q, width: work.width, height: work.height };
+}
+
+/* ------------------------ OCR.Space (multipart ≤1MB) ------------------------ */
+async function ocrSpaceRecognizeFromCanvas(cropCanvas, { apiKey, lang = 'eng', engine = 2 } = {}) {
+  if (!apiKey) return { rawText: '' }; // caller will fallback
+
+  // Compress to ≤1 MB
+  const { blob, quality, width, height } = await compressCanvasToBlob(cropCanvas, {
+    maxBytes: 1024 * 1024,
+    maxWidth: 1200,
+    minQuality: 0.5,
+    startQuality: 0.85,
+    scaleStep: 0.85
+  });
+  logToConsole('', { bytes: blob.size, quality, width, height }, '[OCR payload compressed]');
+
+  const file = new File([blob], 'hud.jpg', { type: 'image/jpeg' });
 
   const fd = new FormData();
   fd.append('apikey', apiKey);
@@ -278,7 +334,6 @@ async function ocrSpaceRecognizeFromCanvas(cropCanvas, { apiKey, lang = 'eng', e
   fd.append('scale', 'true');
   fd.append('isTable', 'false');
 
-  // POST — if the browser/network blocks it, caller will catch and fallback
   const resp = await fetch('https://api.ocr.space/parse/image', { method: 'POST', body: fd });
   const json = await resp.json();
 
@@ -294,7 +349,8 @@ async function ocrSpaceRecognizeFromCanvas(cropCanvas, { apiKey, lang = 'eng', e
   }, '[OCR.Space meta (processed)]');
 
   if (!parsedRes || exitCode !== 1) {
-    const msg = Array.isArray(json?.ErrorMessage) ? json.ErrorMessage.join('; ') : (json?.ErrorMessage || json?.ErrorDetails || 'Unknown OCR error');
+    const msg = Array.isArray(json?.ErrorMessage) ? json.ErrorMessage.join('; ')
+              : (json?.ErrorMessage || json?.ErrorDetails || 'Unknown OCR error');
     throw new Error(msg);
   }
 
@@ -312,7 +368,7 @@ async function tesseractRecognizeFromCanvas(c) {
   t.width = w; t.height = h;
   const g = t.getContext('2d');
 
-  // Light, safe preprocessing
+  // Light, safe preprocessing for text clarity
   g.filter = 'grayscale(1) contrast(200%) brightness(115%)';
   g.drawImage(c, 0, 0, w, h);
   g.filter = 'none';
@@ -347,9 +403,9 @@ function to24h(timeStr) {
   if (m) return `${m[1].padStart(2,'0')}:${m[2]}`;
   return '';
 }
-
 function extractLatLon(fullText) {
   const text = fullText.replace(/\s+/g, ' ').replace(/[|]+/g,' ').trim();
+  // tolerant “Lat ... Long ...” with optional decimals/commas
   const m = text.match(/Lat[^0-9\-+]*([\-+]?\d{1,3}[.,]?\d{0,8})\D+Long[^0-9\-+]*([\-+]?\d{1,3}[.,]?\d{0,8})/i);
   if (!m) return { lat: NaN, lon: NaN };
 
@@ -359,7 +415,8 @@ function extractLatLon(fullText) {
     if (s.includes('.')) return parseFloat(s);
     const neg = s[0] === '-';
     const body = neg ? s.slice(1) : s;
-    const pos  = isLat ? 2 : (body.length > 5 ? 2 : 2);
+    // Insert decimal after 2 digits conservatively (works for Mumbai region)
+    const pos  = 2;
     const fixed = (neg ? '-' : '') + body.slice(0, pos) + '.' + body.slice(pos);
     return parseFloat(fixed);
   };
@@ -369,6 +426,7 @@ function extractLatLon(fullText) {
   return { lat, lon };
 }
 function extractDateTime(lines) {
+  // prefer bottom few lines
   for (let i = lines.length - 1; i >= Math.max(0, lines.length - 5); i--) {
     const line = lines[i];
     const d = line.match(/(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{4})/);
@@ -404,8 +462,8 @@ function parseHudText(raw) {
 /* ------------------------ Prefill URL ------------------------ */
 function buildPrefillUrl({ date, time, lat, lon, ward, beat, addr, ps }) {
   const params = new URLSearchParams();
-  params.set(ENTRY.date, date);
-  params.set(ENTRY.time, time);
+  params.set(ENTRY.date, date);                         // YYYY-MM-DD
+  params.set(ENTRY.time, time);                         // HH:mm
   params.set(ENTRY.lat,  Number(lat).toFixed(6));
   params.set(ENTRY.lon,  Number(lon).toFixed(6));
   if (ward) params.set(ENTRY.ward, ward);
@@ -415,7 +473,7 @@ function buildPrefillUrl({ date, time, lat, lon, ward, beat, addr, ps }) {
   return `${FORM_BASE}&${params.toString()}`;
 }
 
-/* ------------------------ CDN badge ------------------------ */
+/* ------------------------ CDN badge (Tesseract presence) ------------------------ */
 function updateCdnBadge() {
   const b = $('cdnBadge'); if (!b) return;
   const ok = !!(window.Tesseract && Tesseract.recognize);
