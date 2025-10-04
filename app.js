@@ -4,9 +4,29 @@
    - Single GeoJSON for Beats that also contains Ward info
    - Police jurisdiction GeoJSON kept separate
    - Robust OCR + parsing + prefill normalization
+   - new ocr engine
    ========================================================== */
 
 const $ = (id) => document.getElementById(id);
+
+/* ---------- OCR Engine Toggle ---------- */
+// If you want OCR.Space, set true and put your key below
+const USE_OCR_SPACE = true;
+// ← (Optional) drop your key here; or keep empty and read from env/secret manager
+const OCR_SPACE_API_KEY = 'K86010114388957'; // provided earlier; replace if needed
+
+/* ---------- Google Form Mapping ---------- */
+const FORM_BASE = 'https://docs.google.com/forms/d/e/1FAIpQLSeo-xlOSxvG0IwtO5MkKaTJZNJkgTsmgZUw-FBsntFlNdRnCw/viewform?usp=pp_url';
+const ENTRY = {
+  date: 'entry.1911996449',
+  time: 'entry.1421115881',
+  lat : 'entry.419288992',
+  lon : 'entry.113122688',
+  ward: 'entry.1625337207',
+  beat: 'entry.1058310891',
+  addr: 'entry.1188611077',
+  ps  : 'entry.1555105834'
+};
 
 /* ---------- UI refs ---------- */
 const fileInput   = $('fileInput');
@@ -43,6 +63,14 @@ function updateCdnBadge(){
 }
 document.addEventListener('DOMContentLoaded', updateCdnBadge);
 window.addEventListener('load', updateCdnBadge);
+
+const geoBadge = $('geoBadge');
+function setGeoBadge(state){
+  if (!geoBadge) return;
+  if (state === 'ok') { geoBadge.textContent = 'Geo: Loaded'; geoBadge.className = 'badge badge-ok glow'; }
+  else if (state === 'err') { geoBadge.textContent = 'Geo: Error'; geoBadge.className = 'badge badge-err glow'; }
+  else { geoBadge.textContent = 'Geo: Loading…'; geoBadge.className = 'badge badge-warn glow'; }
+}
 
 /* ---------- Helpers ---------- */
 function setPill(name, state){
@@ -85,11 +113,7 @@ function logToConsole(rawText, parsed, note=''){
   pre.textContent = log + '\n' + pre.textContent;
 }
 
-/* ---------- Form mapping ---------- */
-const FORM_BASE='https://docs.google.com/forms/d/e/1FAIpQLSeo-xlOSxvG0IwtO5MkKaTJZNJkgTsmgZUw-FBsntFlNdRnCw/viewform?usp=pp_url';
-const ENTRY={date:'entry.1911996449',time:'entry.1421115881',lat:'entry.419288992',lon:'entry.113122688',ward:'entry.1625337207',beat:'entry.1058310891',addr:'entry.1188611077',ps:'entry.1555105834'};
-
-/* ---------- Static crop ---------- */
+/* ---------- Static HUD Crop (relaxed left) ---------- */
 const STATIC_CROP={
   portrait:{ top:0.755,height:0.235,mapCut:0.205,pad:{top:0.020,bottom:0.018,left:0.028,right:0.024} },
   landscape:{ top:0.775,height:0.190,mapCut:0.185,pad:{top:0.016,bottom:0.014,left:0.022,right:0.020} }
@@ -120,7 +144,7 @@ async function cropHud(dataURL){
   return c.toDataURL('image/png');
 }
 
-/* ---------- Preprocess (light) ---------- */
+/* ---------- Light Preprocess for OCR ---------- */
 async function preprocessForOCR(cropDataURL){
   const src=await loadImage(cropDataURL);
   const w=src.naturalWidth, h=src.naturalHeight;
@@ -134,6 +158,7 @@ async function preprocessForOCR(cropDataURL){
   const ctx=c.getContext('2d',{willReadFrequently:true});
   ctx.drawImage(src, 0, -cutTop, w, h);
 
+  // Upscale x3 then hard threshold to emphasize HUD glyphs
   const up=document.createElement('canvas');
   up.width=c.width*3; up.height=c.height*3;
   const uctx=up.getContext('2d');
@@ -144,7 +169,7 @@ async function preprocessForOCR(cropDataURL){
   const d=im.data;
   for(let i=0;i<d.length;i+=4){
     const avg=(d[i]+d[i+1]+d[i+2])/3;
-    const v = avg>140?255:0;
+    const v = avg>140?255:0;   // white text on black bg
     d[i]=d[i+1]=d[i+2]=v; d[i+3]=255;
   }
   uctx.putImageData(im,0,0);
@@ -152,96 +177,20 @@ async function preprocessForOCR(cropDataURL){
   return up.toDataURL('image/png');
 }
 
-/* ---------- Drag & drop (macOS/Safari-safe) ---------- */
-
-// 1) Stop the browser from navigating away when a file is dropped anywhere.
-['dragover','drop'].forEach(ev =>
-  window.addEventListener(ev, e => { e.preventDefault(); }, { passive:false })
-);
-
-// 2) Utility to extract a File from DataTransfer, preferring images (uses items for Safari)
-function pickFileFromDataTransfer(dt){
-  if (!dt) return null;
-
-  // Prefer items (Safari-friendly)
-  if (dt.items && dt.items.length){
-    for (const it of dt.items){
-      if (it.kind === 'file'){
-        const f = it.getAsFile();
-        if (f && /^image\//i.test(f.type)) return f;   // image first
-      }
-    }
-    // Fallback: take the first file item if no explicit image type matched
-    for (const it of dt.items){
-      if (it.kind === 'file'){
-        const f = it.getAsFile();
-        if (f) return f;
-      }
-    }
-  }
-
-  // Fallback to files list
-  if (dt.files && dt.files.length){
-    return [...dt.files].find(x=>/^image\//i.test(x.type)) || dt.files[0];
-  }
-
-  return null;
-}
-
-// 3) Visual affordances
-['dragenter','dragover'].forEach(t => dropArea?.addEventListener(t, e=>{
-  e.preventDefault();
-  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
-  dropArea.classList.add('dragover');
-}));
-['dragleave','drop'].forEach(t => dropArea?.addEventListener(t, e=>{
-  e.preventDefault();
-  dropArea.classList.remove('dragover');
-}));
-
-// 4) Click/keyboard to open file picker
-dropArea?.addEventListener('click', ()=> fileInput?.click());
-dropArea?.addEventListener('keydown', e => {
-  if (e.key === 'Enter' || e.key === ' ') fileInput?.click();
+/* ---------- Drag & Drop ---------- */
+dropArea?.addEventListener('click',()=>fileInput?.click());
+dropArea?.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' ') fileInput?.click(); });
+fileInput?.addEventListener('click',e=>{ e.target.value=''; });
+fileInput?.addEventListener('change',e=>{ const f=e.target.files?.[0]; if(f) handleFile(f); });
+['dragenter','dragover'].forEach(t=> dropArea?.addEventListener(t, e=>{ e.preventDefault(); dropArea.classList.add('dragover'); }));
+['dragleave','drop'].forEach(t=> dropArea?.addEventListener(t, e=>{ e.preventDefault(); dropArea.classList.remove('dragover'); }));
+dropArea?.addEventListener('drop', e=>{
+  const f=[...(e.dataTransfer?.files||[])].find(x=>/^image\//i.test(x.type));
+  if (f) handleFile(f);
 });
+$('btnReset')?.addEventListener('click',()=> location.reload());
 
-// 5) Make re-selecting the same file re-trigger change
-fileInput?.addEventListener('click', e => { e.target.value = ''; });
-
-// 6) Handle file chooser
-fileInput?.addEventListener('change', e => {
-  const f = e.target.files?.[0];
-  if (f) acceptAndHandleFile(f);
-});
-
-// 7) Handle drop
-dropArea?.addEventListener('drop', e => {
-  const f = pickFileFromDataTransfer(e.dataTransfer);
-  if (f) acceptAndHandleFile(f);
-});
-
-// 8) Central acceptance + HEIC handling
-async function acceptAndHandleFile(file){
-  // Some Macs produce HEIC; Safari may read it, but canvas/other browsers won’t.
-  const isHeic = /image\/hei[cf]|\.heic$/i.test(file.type) || /\.heic$/i.test(file.name || '');
-
-  if (isHeic){
-    banner('HEIC detected. Please export as JPG/PNG from Photos (File → Export) or change camera format (Most Compatible).', 'error');
-    setPill('upload', 'err');
-    return;
-  }
-
-  if (!/^image\/(jpe?g|png|gif|bmp|webp)$/i.test(file.type)){
-    banner('Please choose an image (JPG/PNG).', 'error');
-    setPill('upload', 'err');
-    return;
-  }
-
-  // proceed
-  handleFile(file);
-}
-
-/* ---------- Main flow ---------- */
+/* ---------- Main Flow ---------- */
 async function handleFile(file){
   if(!/^image\/(jpe?g|png)$/i.test(file.type)){ banner('Please choose a JPG or PNG.','error'); return; }
 
@@ -264,22 +213,34 @@ async function handleFile(file){
     setPill('ocr','err'); banner('Crop/Preprocess failed.','error'); logToConsole('',{error:String(e)},'[Preprocess error]'); return;
   }
 
-  // OCR
-  if(!(window.Tesseract && Tesseract.recognize)){
-    setPill('ocr','err'); banner('OCR engine not loaded (CDN).','error'); return;
-  }
+  // OCR (OCR.Space preferred; fallback Tesseract if toggled)
   let rawText='';
   try{
-    const res = await Tesseract.recognize(
-      processed,
-      'eng',
-      { logger:()=>{}, tessedit_pageseg_mode:6, tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789:+.,/°- ' }
-    );
-    rawText = (res?.data?.text || '').trim();
-    logToConsole(rawText, null, '[OCR complete]');
+    if (USE_OCR_SPACE) {
+      const resp = await fetch('https://api.ocr.space/parse/image', {
+        method: 'POST',
+        headers: { 'apikey': OCR_SPACE_API_KEY },
+        body: new URLSearchParams({
+          base64Image: processed,
+          language: 'eng+hin+mar',
+          isOverlayRequired: 'false',
+          scale: 'true',
+          OCREngine: '3'
+        })
+      });
+      const data = await resp.json();
+      rawText = data?.ParsedResults?.[0]?.ParsedText?.trim() || '';
+      if (!rawText) throw new Error('OCR.Space returned empty text');
+      logToConsole(rawText, null, '[OCR.Space complete]');
+    } else {
+      if(!(window.Tesseract && Tesseract.recognize)) throw new Error('Tesseract not loaded');
+      const res = await Tesseract.recognize(processed,'eng+hin+mar',{ logger:()=>{}, tessedit_pageseg_mode:6 });
+      rawText = (res?.data?.text || '').trim();
+      logToConsole(rawText, null, '[Tesseract complete]');
+    }
     setPill('ocr','ok');
   }catch(e){
-    setPill('ocr','err'); banner('OCR failed. Try clearer photo.','error'); logToConsole('',{error:String(e)},'[OCR error]'); return;
+    setPill('ocr','err'); banner('OCR failed. Check API key/network or try again.','error'); logToConsole('',{error:String(e)},'[OCR error]'); return;
   }
 
   // Parse
@@ -291,16 +252,16 @@ async function handleFile(file){
   }
   setPill('parse','ok');
 
-  // Show parsed values (raw)
+  // Show raw parsed
   outDate && (outDate.textContent = parsed.date);
   outTime && (outTime.textContent = parsed.time);
   outLat  && (outLat.textContent  = parsed.lat.toFixed(6));
   outLon  && (outLon.textContent  = parsed.lon.toFixed(6));
   outAddr && (outAddr.textContent = parsed.address);
 
-  // Geo
+  // Geo (Beats with Ward inside + Police)
   setPill('geo','run');
-  try{ await ensureGeo(); }catch{ setPill('geo','err'); banner('Failed to load GeoJSON.','error'); return; }
+  try{ await ensureGeo(); }catch{ setPill('geo','err'); banner('Failed to load GeoJSON.','error'); setGeoBadge('err'); return; }
   const gj = geoLookup(parsed.lat, parsed.lon);
   if(!gj.ward || !gj.beat || !gj.ps){ setPill('geo','err'); banner('GeoJSON lookup failed.','error'); return; }
   outWard && (outWard.textContent = gj.ward);
@@ -310,13 +271,13 @@ async function handleFile(file){
 
   setPill('review','ok');
 
-  // Normalize for prefill (YYYY-MM-DD / HH:mm 24h)
+  // Normalize to Google Form formats
   const { date: formDate, time: formTime } = normalizeFormRedirect(parsed.date, parsed.time);
   outDate && (outDate.textContent = formDate);
   outTime && (outTime.textContent = formTime);
   logToConsole('', {date: formDate, time: formTime}, '[Prefill normalized → YYYY-MM-DD + HH:mm]');
 
-  // Build URL
+  // Build redirect URL
   const url = new URL(FORM_BASE);
   url.searchParams.set(ENTRY.date, formDate);
   url.searchParams.set(ENTRY.time, formTime);
@@ -326,7 +287,6 @@ async function handleFile(file){
   url.searchParams.set(ENTRY.beat, gj.beat);
   url.searchParams.set(ENTRY.addr, parsed.address);
   url.searchParams.set(ENTRY.ps,   gj.ps);
-
   lastRedirectUrl = url.toString();
 
   try{
@@ -350,7 +310,7 @@ async function handleFile(file){
 function parseHudText(raw){
   let lines = raw.split(/\n/).map(s=>s.trim()).filter(Boolean);
 
-  // Start near location line if present
+  // Start near a likely location line to drop app branding noise
   const locIdx = lines.findIndex(l => /(India|Maharashtra|Mumbai|Navi Mumbai)/i.test(l));
   if (locIdx > 0) lines = lines.slice(locIdx);
   if (lines.length < 3) return {};
@@ -358,7 +318,7 @@ function parseHudText(raw){
   const last = lines[lines.length - 1];
   const prev = lines[lines.length - 2];
 
-  // Address above the last 2 lines
+  // Address is everything above the last 2 lines
   let addr  = lines.slice(0, lines.length - 2).join(', ');
   addr = addr
     .replace(/GPS\s*Map\s*Camera/gi,' ')
@@ -367,13 +327,13 @@ function parseHudText(raw){
     .replace(/^[,\s]+|[,\s]+$/g,'')
     .trim();
 
-  // Lat/Lon primary attempt from 'prev'
+  // Lat/Lon primary attempt from the second-last line
   let lat = NaN, lon = NaN;
   const scrubPrev = prev.replace(/[|]/g,' ').replace(/°/g,' ').replace(/,\s*/g,' ');
   const m = scrubPrev.match(/(-?\d{1,2}\.\d+).+?(-?\d{1,3}\.\d+)/);
   if (m){ lat = parseFloat(m[1]); lon = parseFloat(m[2]); }
 
-  // Fallback: scan whole raw for two decimals in Mumbai bounds
+  // Fallback: scan entire raw for two decimals in Mumbai-ish bounds
   if (isNaN(lat) || isNaN(lon)) {
     const allNums = (raw.match(/-?\d{1,3}\.\d+/g) || []).map(parseFloat);
     for (let i=0;i<allNums.length-1;i++){
@@ -403,7 +363,7 @@ function parseHudText(raw){
   return { address: addr, lat, lon, date, time };
 }
 
-/* ---------- Prefill: YYYY-MM-DD & HH:mm (24h) ---------- */
+/* ---------- Prefill Normalization ---------- */
 function pad2(n){ return n<10 ? '0'+n : String(n); }
 function normalizeFormRedirect(dateStr, timeStr){
   // DATE
@@ -430,115 +390,140 @@ function normalizeFormRedirect(dateStr, timeStr){
   return { date: formDate, time: formTime };
 }
 
-/* ---------- Geo (Single Beats + Ward, plus Police) ---------- */
+/* ---------- Geo (Beats with Ward inside + Police) ---------- */
 let gjB=null, gjP=null;
 
-/**
- * ensureGeo()
- * Loads:
- * - data/beats.geojson  → features include both Beat & Ward in properties
- * - data/police_jurisdiction.geojson
- */
 async function ensureGeo(){
-  if(gjB && gjP) return;
-  const [beats, police] = await Promise.all([
-    fetch('data/beats.geojson').then(r=>{ if(!r.ok) throw new Error('beats.geojson'); return r.json(); }),
-    fetch('data/police_jurisdiction.geojson').then(r=>{ if(!r.ok) throw new Error('police_jurisdiction.geojson'); return r.json(); })
-  ]);
-  gjB = beats; gjP = police;
-
-  const geoBadge = $('geoBadge');
-  if (geoBadge) {
-    const ok = (gjB?.features?.length>0) && (gjP?.features?.length>0);
-    geoBadge.className = `badge ${ ok ? 'badge-ok glow' : 'badge-err glow' }`;
-    geoBadge.textContent = ok ? 'Geo: Ready' : 'Geo: Error';
+  if (gjB && gjP) return;
+  try{
+    setGeoBadge('load');
+    // Beats with Ward properties (e.g., BEAT_NO & WARD inside one file)
+    // Keep the filename the same as your deployed dataset:
+    // - beats.geojson  (must include Ward attribute)
+    // - police_jurisdiction.geojson
+    const [b, p] = await Promise.all([
+      fetch('data/beats.geojson').then(r=>r.json()),
+      fetch('data/police_jurisdiction.geojson').then(r=>r.json()),
+    ]);
+    gjB = b; gjP = p;
+    if (gjB?.features && gjP?.features) setGeoBadge('ok'); else setGeoBadge('err');
+  }catch(e){
+    console.error('Geo load error:', e);
+    setGeoBadge('err');
+    throw e;
   }
 }
 
-/* Point-in-polygon (ray casting) */
-function inPoly(poly,[x,y]){
-  let inside=false;
-  for(const ring of poly){
-    for(let i=0,j=ring.length-1;i<ring.length;j=i++){
-      const xi=ring[i][0], yi=ring[i][1];
-      const xj=ring[j][0], yj=ring[j][1];
-      const intersect=((yi>y)!==(yj>y)) && (x < (xj-xi)*(y-yi)/(yj-yi)+xi);
-      if(intersect) inside=!inside;
+// Haversine distance (m)
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000; const toRad = (d) => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+// point to segment distance in meters (approx)
+function pointToSegmentDistMeters(px, py, ax, ay, bx, by) {
+  const m = 111320;
+  const APx = (px - ax) * m, APy = (py - ay) * m;
+  const ABx = (bx - ax) * m, ABy = (by - ay) * m;
+  const ab2 = ABx*ABx + ABy*ABy || 1e-9;
+  let t = (APx*ABx + APy*ABy) / ab2;
+  t = Math.max(0, Math.min(1, t));
+  const cx = ax + (ABx/m) * t, cy = ay + (ABy/m) * t;
+  return haversineMeters(py, px, cy, cx);
+}
+
+// edge-aware point-in-polygon
+function pointInPolyEdgeAware(rings, ptLonLat, epsMeters = 2) {
+  const [x, y] = ptLonLat; // lon, lat
+  let inside = false;
+  for (const ring of rings) {
+    // Edge tolerance
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [x1, y1] = ring[j], [x2, y2] = ring[i];
+      if (pointToSegmentDistMeters(x, y, x1, y1, x2, y2) <= epsMeters) return true;
+    }
+    // Ray cast
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const xi = ring[i][0], yi = ring[i][1];
+      const xj = ring[j][0], yj = ring[j][1];
+      const intersect = ((yi > y) !== (yj > y)) &&
+                        (x < (xj - xi) * (y - yi) / ((yj - yi) || 1e-12) + xi);
+      if (intersect) inside = !inside;
     }
   }
   return inside;
 }
 
-/**
- * geoLookup(lat, lon)
- * Returns { ward, beat, ps }
- * - Ward & Beat from gjB (single merged file)
- * - Police Station from gjP
- * Property fallbacks included for robustness.
- */
+function propOr(obj, keys, fallback=''){
+  for (const k of keys) if (obj && obj[k] != null && obj[k] !== '') return obj[k];
+  return fallback;
+}
+
 function geoLookup(lat, lon){
   const out = { ward:'', beat:'', ps:'' };
   if (!gjB || !gjP) return out;
 
   const pt = [lon, lat];
   const inG = (g) =>
-    g?.type === 'Polygon' ? inPoly(g.coordinates, pt)
-    : g?.type === 'MultiPolygon' ? g.coordinates.some(r => inPoly(r, pt))
+    g?.type === 'Polygon' ? pointInPolyEdgeAware(g.coordinates, pt)
+    : g?.type === 'MultiPolygon' ? g.coordinates.some(r => pointInPolyEdgeAware(r, pt))
     : false;
 
-  // Beats (with Ward embedded)
-  for (const f of gjB.features) {
-    if (inG(f.geometry)) {
-      const p = f.properties || {};
-
-      // Pull ward from common keys, now including "description"
-      const wardRaw = p.WARD ?? p.WARD_NAME ?? p.ward ?? p.description ?? p.DESCRIPTION ?? p.NAME ?? p.name ?? '';
-      // Pull beat from common keys; prefer explicit beat fields, else Name/name
-      let beatRaw = p.BEAT_NO ?? p.BEAT ?? p.beat ?? p.NAME ?? p.Name ?? p.name ?? '';
-
-      // Optional: if Name contains patterns like "BEAT 1", keep it tidy
-      if (!p.BEAT_NO && !p.BEAT && typeof beatRaw === 'string') {
-        const m = beatRaw.match(/BEAT\s*\w+/i);
-        if (m) beatRaw = m[0]; // e.g., "BEAT 1"
-      }
-
-      out.ward = String(wardRaw).trim();             // e.g., "R/N"
-      out.beat = String(beatRaw).trim();             // e.g., "BEAT 1"
-      break;
-    }
-  }
-
+  // Beats (with Ward info within properties)
+  let beatFeat = gjB.features.find(f => inG(f.geometry));
   // Police
-  for (const f of gjP.features) {
-    if (inG(f.geometry)) {
-      const p = f.properties || {};
-      out.ps = String(p.PS_NAME ?? p.NAME ?? p.name ?? p.police ?? '').trim();
-      break;
+  let psFeat = gjP.features.find(f => inG(f.geometry));
+
+  // Fallback to nearest within 100 m if needed (handles slivers/edge cases)
+  function nearestFeature(feats) {
+    let best=null, bestD=Infinity;
+    for (const f of feats) {
+      const g=f.geometry; if(!g) continue;
+      let cx=0, cy=0, n=0;
+      if (g.type==='Polygon') {
+        for (const p of g.coordinates[0]) { cx+=p[0]; cy+=p[1]; n++; }
+      } else if (g.type==='MultiPolygon') {
+        for (const ring of g.coordinates[0]) {
+          for (const p of ring) { cx+=p[0]; cy+=p[1]; n++; }
+        }
+      }
+      if (!n) continue; cx/=n; cy/=n;
+      const d = haversineMeters(lat, lon, cy, cx);
+      if (d<bestD) { best=f; bestD=d; }
     }
+    return (bestD<=100)?best:null;
   }
+
+  if (!beatFeat) beatFeat = nearestFeature(gjB.features);
+  if (!psFeat)   psFeat   = nearestFeature(gjP.features);
+
+  const beatProps = beatFeat?.properties || {};
+  out.beat = propOr(beatProps, ['BEAT_NO','BEAT','Beat','Beat_No','BeatNo','BEATNUMBER']);
+  // Ward comes from the same beat feature’s properties
+  out.ward = propOr(beatProps, ['WARD','WARD_NO','Ward','Ward_No','Ward_Name','WARDNAME']);
+
+  const psProps = psFeat?.properties || {};
+  out.ps   = propOr(psProps, ['PS_NAME','PS','Police_Station','PSName','NAME','name']);
 
   return out;
 }
 
-/* ---------- Console buttons ---------- */
-document.addEventListener('DOMContentLoaded', () => {
-  const copyBtn = document.getElementById('consoleCopy');
-  const toggleBtn = document.getElementById('consoleToggle');
-  const pre = document.getElementById('console-pre');
+/* ---------- Manual Redirect (fallback) ---------- */
+function addManualRedirect(url){
+  let btn=document.getElementById('manualRedirect');
+  if(btn) return;
+  btn=document.createElement('button');
+  btn.id='manualRedirect';
+  btn.className='btn btn-primary';
+  btn.style.marginTop='10px';
+  btn.textContent='Open Google Form';
+  btn.onclick=()=> window.open(url,'_blank','noopener');
+  const box = document.getElementById('console-box');
+  if (box) box.parentNode.insertBefore(btn, box.nextSibling);
+}
 
-  copyBtn?.addEventListener('click', () => {
-    if (!pre) return;
-    navigator.clipboard.writeText(pre.textContent || '').then(() => {
-      banner('Console copied.', 'success');
-      setTimeout(()=>banner('', ''), 1200);
-    });
-  });
-
-  toggleBtn?.addEventListener('click', () => {
-    if (!pre) return;
-    const hidden = pre.style.display === 'none';
-    pre.style.display = hidden ? '' : 'none';
-    toggleBtn.setAttribute('aria-expanded', String(hidden));
-    toggleBtn.textContent = hidden ? 'Hide' : 'Show';
-  });
-});
+/* ==========================================================
+   END: all wiring is compatible with existing index/styles
+   ========================================================== */
