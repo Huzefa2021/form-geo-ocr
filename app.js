@@ -16,7 +16,7 @@ const CROP = {
 };
 
 /** OCR.Space API key (set in-index via <script> before this file or inline below) */
-const OCRSPACE_API_KEY = window.OCRSPACE_API_KEY || '';   // put your key in index, or here
+const OCRSPACE_API_KEY = 'K86010114388957' || '';   // put your key in index, or here
 const OCRSPACE_ENGINE  = 2;                               // 2 = fast/good; 3 = "best" but slower
 const OCRSPACE_LANG    = 'eng';                           // use 'eng' primarily (Hindi lines often noisy)
 
