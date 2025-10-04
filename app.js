@@ -42,12 +42,8 @@
   const TESS_PSM = 6; // Assume single uniform text block (HUD box)
 
   // Static crop (percentages) — tuned to GPS Map Camera HUD
-  const CROP = {
-    top: 0.62,      // start a bit higher to include full HUD box
-    height: 0.33,   // bottom band
-    left: 0.06,     // cushion to avoid aggressive left cut
-    width: 0.88     // keep right edge inside rounded card
-  };
+  const CROP_PORTRAIT  = { top: 0.62, height: 0.33, left: 0.06, width: 0.88 };
+const CROP_LANDSCAPE = { top: 0.58, height: 0.38, left: 0.06, width: 0.88 }; // start higher, include more bottom
 
   /* ---------------- DOM HELPERS ---------------- */
   const $ = (id) => document.getElementById(id);
@@ -137,17 +133,36 @@
 
   // Stable static crop for GPS HUD (with gentle left cushion)
   async function cropHud(dataURL) {
-    const img = await loadImage(dataURL);
-    const W = img.naturalWidth, H = img.naturalHeight;
-    const sx = Math.floor(W * CROP.left);
-    const sy = Math.floor(H * CROP.top);
-    const sw = Math.floor(W * CROP.width);
-    const sh = Math.floor(H * CROP.height);
+  const img = await loadImage(dataURL);
+  const W = img.naturalWidth, H = img.naturalHeight;
+  const C = (W > H) ? CROP_LANDSCAPE : CROP_PORTRAIT; // landscape vs portrait
 
-    const c = document.createElement('canvas');
-    c.width = sw; c.height = sh;
-    const ctx = c.getContext('2d');
-    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+  // compute crop
+  let sx = Math.floor(W * C.left);
+  let sw = Math.floor(W * C.width);
+  let sy = Math.floor(H * C.top);
+  let sh = Math.floor(H * C.height);
+
+  // ensure we reach (or nearly reach) the bottom
+  const bottomPadPx = 0; // set to e.g. 6–12 if you want a guaranteed tiny margin
+  const maxSh = (H - sy - bottomPadPx);
+  if (sh > maxSh) sh = maxSh;
+
+  const c = document.createElement('canvas');
+  c.width = sw; c.height = sh;
+  c.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+
+  // downscale+encode as you already do...
+  const scale = Math.min(1200 / sw, 1);
+  if (scale < 1) {
+    const d = document.createElement('canvas');
+    d.width = Math.round(sw * scale);
+    d.height = Math.round(sh * scale);
+    d.getContext('2d').drawImage(c, 0, 0, d.width, d.height);
+    return d.toDataURL('image/jpeg', 0.85);
+  }
+  return c.toDataURL('image/jpeg', 0.85);
+}
 
     // Downscale to reduce payload; OCR engines handle crisp text well
     const scale = Math.min(1200 / sw, 1);
