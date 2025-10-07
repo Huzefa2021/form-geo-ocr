@@ -1,44 +1,14 @@
 /* ==========================================================
    Abandoned Vehicles — Marshal Upload (MCGM)
-   Build: v2025.10.07.GEO-FIX
-
-   - Adaptive HUD crop (portrait/landscape, cushioned)
-   - OCR.Space (multipart) with ≤1MB auto-compression
-   - Fallback to Tesseract when OCR.Space fails/blocked/empty
-   - Robust parsing (lat/lon w/ missing dot, flexible time)
-   - Prefill normalization (YYYY-MM-DD, HH:mm 24h)
-   - NEW: GeoJSON loader (wards / beats / police) + PIP lookup
-   - UI/UX unchanged: same element IDs, pills, console
+   Build: v2025.09.25.M1
+   - Single GeoJSON for Beats that also contains Ward info
+   - Police jurisdiction GeoJSON kept separate
+   - Robust OCR + parsing + prefill normalization
    ========================================================== */
 
-/* ------------------------ Tweakables ------------------------ */
-const CROP = {
-  portrait:  { top: 0.62, height: 0.36, left: 0.04, width: 0.92 },
-  landscape: { top: 0.70, height: 0.28, left: 0.04, width: 0.92 }
-};
-
-// Embed key here or define window.OCRSPACE_API_KEY in index.html before this script
-const OCRSPACE_API_KEY = (window.OCRSPACE_API_KEY || 'K86010114388957');
-const OCRSPACE_ENGINE  = 2;
-const OCRSPACE_LANG    = 'eng';
-
-// Google Form mapping
-const FORM_BASE =
-  'https://docs.google.com/forms/d/e/1FAIpQLSeo-xlOSxvG0IwtO5MkKaTJZNJkgTsmgZUw-FBsntFlNdRnCw/viewform?usp=pp_url';
-const ENTRY = {
-  date: 'entry.1911996449',
-  time: 'entry.1421115881',
-  lat:  'entry.419288992',
-  lon:  'entry.113122688',
-  ward: 'entry.1625337207',
-  beat: 'entry.1058310891',
-  addr: 'entry.1188611077',
-  ps:   'entry.1555105834'
-};
-
-/* ------------------------ DOM refs ------------------------ */
 const $ = (id) => document.getElementById(id);
 
+/* ---------- UI refs ---------- */
 const fileInput   = $('fileInput');
 const dropArea    = $('dropArea');
 const imgOriginal = $('imgOriginal');
@@ -62,440 +32,11 @@ const pills = {
   redirect: $('pill-redirect'),
 };
 
-const geoBadge = $('geoBadge');
 let lastRedirectUrl = '';
 
-/* ------------------------ GeoJSON state ------------------------ */
-const GEO = {
-  loaded: false,
-  wards: null,
-  beats: null,
-  police: null,
-  errors: [],
-};
-
-/* ------------------------ Utilities ------------------------ */
-function setPill(name, state) {
-  const p = pills[name]; if (!p) return;
-  p.className = p.className.replace(/\b(ok|run|err|pulse)\b/g, '').trim();
-  if (state) p.classList.add(state);
-}
-function banner(msg, kind = 'info') {
-  const b = $('banner'); if (!b) return;
-  if (!msg) { b.hidden = true; return; }
-  b.hidden = false; b.textContent = msg; b.className = `banner ${kind}`;
-}
-function resetOutputs() {
-  ['upload','ocr','parse','geo','review','redirect'].forEach(k => setPill(k, null));
-  [outDate,outTime,outLat,outLon,outAddr,outWard,outBeat,outPS].forEach(o => o && (o.textContent = '—'));
-  if (imgOriginal) imgOriginal.src = '';
-  if (imgCrop) imgCrop.src = '';
-  banner('');
-  logToConsole('', '', '[Reset]');
-  lastRedirectUrl = '';
-}
-function fileToDataURL(file) {
-  return new Promise((resolve, reject) => {
-    const fr = new FileReader();
-    fr.onload = () => resolve(fr.result);
-    fr.onerror = reject;
-    fr.readAsDataURL(file);
-  });
-}
-function loadImage(url) {
-  return new Promise((resolve, reject) => {
-    const im = new Image();
-    im.onload = () => resolve(im);
-    im.onerror = reject;
-    im.src = url;
-  });
-}
-
-/* ------------------------ Console logger ------------------------ */
-function logToConsole(rawText, parsed, note = '') {
-  const pre = $('console-pre'); if (!pre) return;
-  const stamp = new Date().toLocaleTimeString();
-  const safe = (v) => (v == null ? '' : String(v));
-  const log = [
-    `⏱ ${stamp} ${note}`,
-    rawText !== '' ? '--- RAW OCR TEXT ---' : '',
-    rawText !== '' ? safe(rawText) : '',
-    parsed !== '' ? '--- PARSED FIELDS ---' : '',
-    (parsed && typeof parsed === 'object') ? JSON.stringify(parsed, null, 2) : (parsed !== '' ? safe(parsed) : ''),
-    '────────────────────────────────────────'
-  ].filter(Boolean).join('\n');
-  pre.textContent = `${pre.textContent ? pre.textContent + '\n' : ''}${log}\n`;
-}
-
-/* ------------------------ Drag & drop wiring ------------------------ */
-dropArea?.addEventListener('click', () => fileInput?.click());
-dropArea?.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') fileInput?.click(); });
-fileInput?.addEventListener('click', (e) => { e.target.value = ''; });
-fileInput?.addEventListener('change', (e) => { const f = e.target.files?.[0]; if (f) handleFile(f); });
-
-['dragenter','dragover'].forEach(t => dropArea?.addEventListener(t, e => { e.preventDefault(); dropArea.classList.add('dragover'); }));
-['dragleave','drop'].forEach(t => dropArea?.addEventListener(t, e => { e.preventDefault(); dropArea.classList.remove('dragover'); }));
-dropArea?.addEventListener('drop', (e) => {
-  const f = [...(e.dataTransfer?.files || [])].find(f => /^image\//i.test(f.type));
-  if (f) handleFile(f);
-});
-
-$('btnReset')?.addEventListener('click', resetOutputs);
-
-/* ------------------------ Core Flow ------------------------ */
-async function handleFile(file) {
-  if (!/^image\/(jpe?g|png)$/i.test(file.type)) {
-    banner('Please choose a JPG or PNG.', 'error');
-    return;
-  }
-
-  resetOutputs();
-  setPill('upload', 'run');
-
-  const dataURL = await fileToDataURL(file);
-  imgOriginal.src = dataURL;
-  setPill('upload', 'ok');
-
-  // Crop HUD
-  setPill('ocr', 'run');
-  const cropCanvas = await cropHudToCanvas(dataURL);
-  imgCrop.src = cropCanvas.toDataURL('image/png');
-
-  // Try OCR.Space (multipart, ≤1MB)
-  let rawText = '';
-  let usedEngine = 'OCR.Space';
-  try {
-    if (OCRSPACE_API_KEY) {
-      const os = await ocrSpaceRecognizeFromCanvas(cropCanvas, {
-        apiKey: OCRSPACE_API_KEY,
-        lang: OCRSPACE_LANG,
-        engine: OCRSPACE_ENGINE
-      });
-      rawText = os.rawText || '';
-      logToConsole(rawText, { parsed: '(pending parse)' }, '[OCR.Space result]');
-    } else {
-      logToConsole('', { info: 'No OCR.Space key; using Tesseract' }, '[OCR.Space skipped]');
-    }
-  } catch (err) {
-    // Network/CORS/server errors → fallback
-    logToConsole('', { error: String(err) }, '[OCR.Space error]');
-  }
-
-  // Fallback to Tesseract if OCR.Space empty/failed
-  if (!rawText || rawText.trim().length < 10) {
-    try {
-      usedEngine = 'Tesseract';
-      const t = await tesseractRecognizeFromCanvas(cropCanvas);
-      rawText = t.rawText || '';
-      logToConsole(rawText, '', '[OCR complete via Tesseract]');
-    } catch (err) {
-      setPill('ocr', 'err');
-      banner('OCR failed. Try clearer photo.', 'error');
-      logToConsole('', { error: String(err) }, '[OCR error]');
-      return;
-    }
-  }
-
-  setPill('ocr', 'ok');
-
-  // Parse
-  setPill('parse', 'run');
-  const parsed = parseHudText(rawText);
-  logToConsole('', { engineUsed: usedEngine, parsed }, '[Parse complete]');
-
-  if (!parsed.date || !parsed.time || isNaN(parsed.lat) || isNaN(parsed.lon)) {
-    setPill('parse', 'err');
-    banner('Could not parse all fields from HUD.', 'error');
-    return;
-  }
-  setPill('parse', 'ok');
-
-  // Fill UI
-  outDate.textContent = parsed.date;
-  outTime.textContent = parsed.time;
-  outLat.textContent  = parsed.lat.toFixed(6);
-  outLon.textContent  = parsed.lon.toFixed(6);
-  outAddr.textContent = parsed.address;
-
-  // GeoJSON lookup (if loaded)
-  await ensureGeoLoaded();
-  setPill('geo', 'run');
-  const geo = lookupJurisdiction(parsed.lat, parsed.lon);
-  if (geo.ward)  outWard.textContent = geo.ward;
-  if (geo.beat)  outBeat.textContent = geo.beat;
-  if (geo.ps)    outPS.textContent   = geo.ps;
-  setPill('geo', (geo.ward || geo.beat || geo.ps) ? 'ok' : 'warn');
-
-  setPill('review', 'ok');
-
-  // Prefill URL
-  const url = buildPrefillUrl({
-    date: parsed.date,
-    time: parsed.time,
-    lat: parsed.lat,
-    lon: parsed.lon,
-    ward: outWard?.textContent && outWard.textContent !== '—' ? outWard.textContent : '',
-    beat: outBeat?.textContent && outBeat.textContent !== '—' ? outBeat.textContent : '',
-    addr: parsed.address,
-    ps:   outPS?.textContent   && outPS.textContent   !== '—' ? outPS.textContent   : ''
-  });
-
-  lastRedirectUrl = url;
-  logToConsole('', { redirect: url }, '[Redirect URL]');
-
-  try {
-    setPill('redirect', 'run');
-    window.open(url, '_blank', 'noopener');
-    setPill('redirect', 'ok');
-  } catch {
-    setPill('redirect', 'err');
-    banner('Auto-redirect blocked. Use the Redirect pill.', 'error');
-  }
-
-  // Manual redirect via pill
-  if (pills.redirect) {
-    pills.redirect.style.cursor = 'pointer';
-    pills.redirect.onclick = () => { if (lastRedirectUrl) window.open(lastRedirectUrl, '_blank', 'noopener'); };
-  }
-}
-
-/* ------------------------ Crop (adaptive + cushions) ------------------------ */
-async function cropHudToCanvas(dataURL) {
-  const img = await loadImage(dataURL);
-  const W = img.naturalWidth  || img.width;
-  const H = img.naturalHeight || img.height;
-
-  const isLandscape = W >= H;
-  const cfg = isLandscape ? CROP.landscape : CROP.portrait;
-
-  const sx = Math.max(0, Math.floor(W * cfg.left));
-  const sy = Math.max(0, Math.floor(H * cfg.top));
-  const sw = Math.floor(W * cfg.width);
-  const sh = Math.floor(H * cfg.height);
-
-  const c = document.createElement('canvas');
-  c.width = sw; c.height = sh;
-  const ctx = c.getContext('2d');
-
-  // Gentle filter helps both engines
-  ctx.filter = 'grayscale(1) contrast(170%) brightness(110%)';
-  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-  ctx.filter = 'none';
-
-  // Optional: cap very large crops before OCR to speed up
-  const MAX_W = 1400;
-  if (c.width > MAX_W) return downscaleCanvas(c, MAX_W);
-  return c;
-}
-
-/* ------------------------ Canvas scaling + compression ------------------------ */
-function downscaleCanvas(srcCanvas, maxWidth = 1200) {
-  const sw = srcCanvas.width, sh = srcCanvas.height;
-  if (sw <= maxWidth) return srcCanvas;
-  const scale = maxWidth / sw;
-  const dw = Math.round(sw * scale);
-  const dh = Math.round(sh * scale);
-  const d = document.createElement('canvas');
-  d.width = dw; d.height = dh;
-  const ctx = d.getContext('2d');
-  ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(srcCanvas, 0, 0, dw, dh);
-  return d;
-}
-async function compressCanvasToBlob(canvas, {
-  maxBytes = 1024 * 1024,      // 1 MB
-  maxWidth = 1200,             // width cap
-  minQuality = 0.5,
-  startQuality = 0.85,
-  scaleStep = 0.85
-} = {}) {
-  let work = downscaleCanvas(canvas, maxWidth);
-  let q = startQuality;
-  let blob = await new Promise(res => work.toBlob(res, 'image/jpeg', q));
-  let attempts = 0;
-
-  while (blob && blob.size > maxBytes && attempts < 10) {
-    if (q > minQuality + 0.05) {
-      q = Math.max(minQuality, q - 0.1);
-    } else {
-      const dw = Math.max(Math.round(work.width * scaleStep), 600);
-      work = downscaleCanvas(work, dw);
-      q = startQuality;
-    }
-    blob = await new Promise(res => work.toBlob(res, 'image/jpeg', q));
-    attempts++;
-  }
-  return { blob, quality: q, width: work.width, height: work.height };
-}
-
-/* ------------------------ OCR.Space (multipart ≤1MB) ------------------------ */
-async function ocrSpaceRecognizeFromCanvas(cropCanvas, { apiKey, lang = 'eng', engine = 2 } = {}) {
-  if (!apiKey) return { rawText: '' }; // caller will fallback
-
-  // Compress to ≤1 MB
-  const { blob, quality, width, height } = await compressCanvasToBlob(cropCanvas, {
-    maxBytes: 1024 * 1024,
-    maxWidth: 1200,
-    minQuality: 0.5,
-    startQuality: 0.85,
-    scaleStep: 0.85
-  });
-  logToConsole('', { bytes: blob.size, quality, width, height }, '[OCR payload compressed]');
-
-  const file = new File([blob], 'hud.jpg', { type: 'image/jpeg' });
-
-  const fd = new FormData();
-  fd.append('apikey', apiKey);
-  fd.append('file', file);
-  fd.append('language', lang);
-  fd.append('OCREngine', String(engine));
-  fd.append('isOverlayRequired', 'false');
-  fd.append('detectOrientation', 'true');
-  fd.append('scale', 'true');
-  fd.append('isTable', 'false');
-
-  const resp = await fetch('https://api.ocr.space/parse/image', { method: 'POST', body: fd });
-  const json = await resp.json();
-
-  const parsedRes = json?.ParsedResults?.[0] || null;
-  const exitCode  = json?.OCRExitCode ?? parsedRes?.FileParseExitCode ?? 0;
-
-  logToConsole('', {
-    engine,
-    language: lang,
-    exitCode,
-    errored: exitCode !== 1,
-    messages: json?.ErrorMessage || json?.ErrorDetails || ''
-  }, '[OCR.Space meta (processed)]');
-
-  if (!parsedRes || exitCode !== 1) {
-    const msg = Array.isArray(json?.ErrorMessage) ? json.ErrorMessage.join('; ')
-              : (json?.ErrorMessage || json?.ErrorDetails || 'Unknown OCR error');
-    throw new Error(msg);
-  }
-
-  const rawText = parsedRes.ParsedText || '';
-  return { rawText };
-}
-
-/* ------------------------ Tesseract fallback ------------------------ */
-async function tesseractRecognizeFromCanvas(c) {
-  if (!(window.Tesseract && Tesseract.recognize)) {
-    throw new Error('Tesseract not available');
-  }
-  const w = c.width, h = c.height;
-  const t = document.createElement('canvas');
-  t.width = w; t.height = h;
-  const g = t.getContext('2d');
-
-  // Light, safe preprocessing for text clarity
-  g.filter = 'grayscale(1) contrast(200%) brightness(115%)';
-  g.drawImage(c, 0, 0, w, h);
-  g.filter = 'none';
-
-  const dataURL = t.toDataURL('image/png');
-  const res = await Tesseract.recognize(dataURL, 'eng', { tessedit_pageseg_mode: 6 });
-  const rawText = (res?.data?.text || '').trim();
-  return { rawText };
-}
-
-/* ------------------------ Parsing helpers ------------------------ */
-function toIsoDate(dmy) {
-  const m = dmy.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
-  if (!m) return '';
-  const dd = m[1].padStart(2, '0');
-  const mm = m[2].padStart(2, '0');
-  const yyyy = m[3];
-  return `${yyyy}-${mm}-${dd}`;
-}
-function to24h(timeStr) {
-  const s = timeStr.replace(/\s+/g, ' ').trim();
-  let m = s.match(/(\d{1,2})\s*[:\.]\s*(\d{2})\s*([AP]M)/i);
-  if (m) {
-    let hh = parseInt(m[1], 10);
-    const mm = m[2];
-    const ap = m[3].toUpperCase();
-    if (ap === 'PM' && hh < 12) hh += 12;
-    if (ap === 'AM' && hh === 12) hh = 0;
-    return `${String(hh).padStart(2,'0')}:${mm}`;
-  }
-  m = s.match(/(\d{1,2})\s*[:\.]\s*(\d{2})/);
-  if (m) return `${m[1].padStart(2,'0')}:${m[2]}`;
-  return '';
-}
-function extractLatLon(fullText) {
-  const text = fullText.replace(/\s+/g, ' ').replace(/[|]+/g,' ').trim();
-  // tolerant “Lat ... Long ...” with optional decimals/commas
-  const m = text.match(/Lat[^0-9\-+]*([\-+]?\d{1,3}[.,]?\d{0,8})\D+Long[^0-9\-+]*([\-+]?\d{1,3}[.,]?\d{0,8})/i);
-  if (!m) return { lat: NaN, lon: NaN };
-
-  const fixNum = (s) => {
-    if (!s) return NaN;
-    s = s.replace(',', '.');
-    if (s.includes('.')) return parseFloat(s);
-    const neg = s[0] === '-';
-    const body = neg ? s.slice(1) : s;
-    // Insert decimal after 2 digits (Mumbai region)
-    const pos  = 2;
-    const fixed = (neg ? '-' : '') + body.slice(0, pos) + '.' + body.slice(pos);
-    return parseFloat(fixed);
-  };
-
-  const lat = fixNum(m[1]);
-  const lon = fixNum(m[2]);
-  return { lat, lon };
-}
-function extractDateTime(lines) {
-  // prefer bottom few lines
-  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 5); i--) {
-    const line = lines[i];
-    const d = line.match(/(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{4})/);
-    const t = line.match(/(\d{1,2}\s*[:\.]\s*\d{2}(?:\s*[AP]M)?)/i);
-    if (d && t) return { date: toIsoDate(d[1]), time: to24h(t[1]) };
-  }
-  const joined = lines.join(' ');
-  const d = joined.match(/(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{4})/);
-  const t = joined.match(/(\d{1,2}\s*[:\.]\s*\d{2}(?:\s*[AP]M)?)/i);
-  return { date: d ? toIsoDate(d[1]) : '', time: t ? to24h(t[1]) : '' };
-}
-function extractAddress(lines) {
-  const cleaned = lines
-    .map(s => s.trim())
-    .filter(Boolean)
-    .filter(s => !/^Google$/i.test(s))
-    .filter(s => !/GPS\s*Map\s*Camera/i.test(s));
-  const latIdx = cleaned.findIndex(s => /Lat/i.test(s) && /Long/i.test(s));
-  const upto = latIdx >= 0 ? cleaned.slice(0, latIdx) : cleaned;
-  const body = (upto[0] && /^[A-Za-z].*India/.test(upto[0]) && (upto[1] || '').length > 5)
-    ? upto.slice(1)
-    : upto;
-  return body.join(', ').replace(/\s*,\s*,+/g, ', ').replace(/\s{2,}/g, ' ').trim();
-}
-function parseHudText(raw) {
-  const lines = raw.split(/\n/).map(s => s.trim()).filter(Boolean);
-  const { lat, lon } = extractLatLon(raw);
-  const { date, time } = extractDateTime(lines);
-  const address = extractAddress(lines);
-  return { address, lat, lon, date, time };
-}
-
-/* ------------------------ Prefill URL ------------------------ */
-function buildPrefillUrl({ date, time, lat, lon, ward, beat, addr, ps }) {
-  const params = new URLSearchParams();
-  params.set(ENTRY.date, date);                         // YYYY-MM-DD
-  params.set(ENTRY.time, time);                         // HH:mm
-  params.set(ENTRY.lat,  Number(lat).toFixed(6));
-  params.set(ENTRY.lon,  Number(lon).toFixed(6));
-  if (ward) params.set(ENTRY.ward, ward);
-  if (beat) params.set(ENTRY.beat, beat);
-  params.set(ENTRY.addr, addr || '');
-  if (ps)   params.set(ENTRY.ps, ps);
-  return `${FORM_BASE}&${params.toString()}`;
-}
-
-/* ------------------------ CDN badge (Tesseract presence) ------------------------ */
-function updateCdnBadge() {
-  const b = $('cdnBadge'); if (!b) return;
+/* ---------- Badges ---------- */
+function updateCdnBadge(){
+  const b = $('cdnBadge'); if(!b) return;
   const ok = !!(window.Tesseract && Tesseract.recognize);
   b.textContent = ok ? 'CDN: v5 (Loaded)' : 'CDN: v5 (Not Loaded)';
   b.className = `badge ${ok ? 'badge-ok glow' : 'badge-err glow'}`;
@@ -503,172 +44,501 @@ function updateCdnBadge() {
 document.addEventListener('DOMContentLoaded', updateCdnBadge);
 window.addEventListener('load', updateCdnBadge);
 
-/* ------------------------ Redirect pill manual fallback ------------------------ */
-$('pill-redirect')?.addEventListener('click', () => {
-  if (!lastRedirectUrl) return;
-  window.open(lastRedirectUrl, '_blank', 'noopener');
-});
-
-/* ======================== GEOJSON LOADER ======================== */
-function setGeoBadge(text, cls) {
-  if (!geoBadge) return;
-  geoBadge.textContent = text;
-  geoBadge.className = `badge ${cls}`;
+/* ---------- Helpers ---------- */
+function setPill(name, state){
+  const p = pills[name]; if(!p) return;
+  p.className = p.className.replace(/\b(ok|run|err|pulse)\b/g,'').trim();
+  if(state) p.classList.add(state);
 }
-async function ensureGeoLoaded() {
-  if (GEO.loaded) return;
+function banner(msg, kind='info'){
+  const b = $('banner'); if(!b) return;
+  if(!msg){ b.hidden = true; return; }
+  b.hidden = false;
+  b.textContent = msg;
+  b.className = `banner ${kind}`;
+}
+function resetOutputs(){
+  ['upload','ocr','parse','geo','review','redirect'].forEach(k=> setPill(k,null));
+  [outDate,outTime,outLat,outLon,outAddr,outWard,outBeat,outPS].forEach(o => o && (o.textContent='—'));
+  if(imgOriginal) imgOriginal.src = '';
+  if(imgCrop) imgCrop.src = '';
+  banner('');
+  logToConsole('','', '[Reset]');
+  lastRedirectUrl = '';
+}
+function fileToDataURL(f){ return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=rej; fr.readAsDataURL(f); }); }
+function loadImage(url){ return new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=url; }); }
 
-  setGeoBadge('Geo: Loading…', 'badge-warn glow');
-  try {
-    // NOTE: paths are relative to your site root; keep your files in /data as you do now
-    const [wards, beats, police] = await Promise.all([
-      fetch('data/wards.geojson').then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch('data/beats.geojson').then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch('data/police_jurisdiction.geojson').then(r => r.ok ? r.json() : null).catch(() => null),
-    ]);
-    GEO.wards  = isFeatureCollection(wards)  ? wards  : null;
-    GEO.beats  = isFeatureCollection(beats)  ? beats  : null;
-    GEO.police = isFeatureCollection(police) ? police : null;
+/* ---------- Console ---------- */
+function logToConsole(rawText, parsed, note=''){
+  const pre = $('console-pre'); if (!pre) return;
+  const stamp = new Date().toLocaleTimeString();
+  const safe = (v)=> (v==null?'':String(v));
+  const log = [
+    `⏱ ${stamp} ${note}`,
+    rawText!=='' ? '--- RAW OCR TEXT ---' : '',
+    rawText!=='' ? safe(rawText) : '',
+    parsed!=='' ? '--- PARSED FIELDS ---' : '',
+    (parsed && typeof parsed==='object') ? JSON.stringify(parsed,null,2) : (parsed!==''?safe(parsed):''),
+    '────────────────────────────────────────'
+  ].filter(Boolean).join('\n');
+  pre.textContent = log + '\n' + pre.textContent;
+}
 
-    const haveAny = !!(GEO.wards || GEO.beats || GEO.police);
-    GEO.loaded = haveAny;
+/* ---------- Form mapping ---------- */
+const FORM_BASE='https://docs.google.com/forms/d/e/1FAIpQLSeo-xlOSxvG0IwtO5MkKaTJZNJkgTsmgZUw-FBsntFlNdRnCw/viewform?usp=pp_url';
+const ENTRY={date:'entry.1911996449',time:'entry.1421115881',lat:'entry.419288992',lon:'entry.113122688',ward:'entry.1625337207',beat:'entry.1058310891',addr:'entry.1188611077',ps:'entry.1555105834'};
 
-    if (haveAny) setGeoBadge('Geo: Ready', 'badge-ok glow');
-    else setGeoBadge('Geo: Missing files', 'badge-err glow');
-  } catch (e) {
-    GEO.errors.push(String(e));
-    setGeoBadge('Geo: Error', 'badge-err glow');
+/* ---------- Static crop ---------- */
+const STATIC_CROP={
+  portrait:{ top:0.755,height:0.235,mapCut:0.205,pad:{top:0.020,bottom:0.018,left:0.028,right:0.024} },
+  landscape:{ top:0.775,height:0.190,mapCut:0.185,pad:{top:0.016,bottom:0.014,left:0.022,right:0.020} }
+};
+const LEFT_RELAX = 0.030;
+
+async function cropHud(dataURL){
+  const img=await loadImage(dataURL);
+  const W=img.naturalWidth, H=img.naturalHeight;
+  const isPortrait=H>=W;
+  const P=isPortrait?STATIC_CROP.portrait:STATIC_CROP.landscape;
+
+  let sy=Math.floor(H*P.top);
+  let sh=Math.floor(H*P.height);
+  sy = Math.max(0, sy - Math.floor(H*P.pad.top));
+  sh = Math.min(H - sy, sh + Math.floor(H*(P.pad.top + P.pad.bottom)));
+
+  let sx=Math.floor(W*(P.mapCut + P.pad.left - LEFT_RELAX));
+  let sw=W - sx - Math.floor(W*P.pad.right);
+  if (sx<0) sx=0;
+  if (sy<0) sy=0;
+  if (sx+sw>W) sw=W-sx;
+  if (sy+sh>H) sh=H-sy;
+
+  const c=document.createElement('canvas');
+  c.width=sw; c.height=sh;
+  c.getContext('2d').drawImage(img, sx,sy,sw,sh, 0,0,sw,sh);
+  return c.toDataURL('image/png');
+}
+
+/* ---------- Preprocess (light) ---------- */
+async function preprocessForOCR(cropDataURL){
+  const src=await loadImage(cropDataURL);
+  const w=src.naturalWidth, h=src.naturalHeight;
+
+  const cutTop=Math.floor(h*0.18);
+  const cutBottom=Math.floor(h*0.04);
+  const h2=h - cutTop - cutBottom;
+
+  const c=document.createElement('canvas');
+  c.width=w; c.height=h2;
+  const ctx=c.getContext('2d',{willReadFrequently:true});
+  ctx.drawImage(src, 0, -cutTop, w, h);
+
+  const up=document.createElement('canvas');
+  up.width=c.width*3; up.height=c.height*3;
+  const uctx=up.getContext('2d');
+  uctx.imageSmoothingEnabled=true;
+  uctx.drawImage(c,0,0,up.width,up.height);
+
+  let im = uctx.getImageData(0,0,up.width,up.height);
+  const d=im.data;
+  for(let i=0;i<d.length;i+=4){
+    const avg=(d[i]+d[i+1]+d[i+2])/3;
+    const v = avg>140?255:0;
+    d[i]=d[i+1]=d[i+2]=v; d[i+3]=255;
   }
-}
-function isFeatureCollection(j) {
-  return j && j.type === 'FeatureCollection' && Array.isArray(j.features);
+  uctx.putImageData(im,0,0);
+
+  return up.toDataURL('image/png');
 }
 
-/* ------------------------ Point-in-Polygon (GeoJSON) ------------------------ */
-function pointInPolygon(lon, lat, geometry) {
-  // Supports Polygon & MultiPolygon. Assumes [lon, lat] order in GeoJSON.
-  const rayCast = (coords) => {
-    let inside = false;
-    for (let i = 0, j = coords.length - 1; i < coords.length; j = i++) {
-      const xi = coords[i][0], yi = coords[i][1];
-      const xj = coords[j][0], yj = coords[j][1];
-      const intersect = ((yi > lat) !== (yj > lat)) &&
-                        (lon < (xj - xi) * (lat - yi) / (yj - yi + 1e-12) + xi);
-      if (intersect) inside = !inside;
-    }
-    return inside;
-  };
+/* ---------- Drag & drop (macOS/Safari-safe) ---------- */
 
-  if (!geometry) return false;
-  if (geometry.type === 'Polygon') {
-    const [outer, ...holes] = geometry.coordinates;
-    if (!rayCast(outer)) return false;
-    for (const hole of holes) { if (rayCast(hole)) return false; } // inside a hole → not contained
-    return true;
-  }
-  if (geometry.type === 'MultiPolygon') {
-    for (const poly of geometry.coordinates) {
-      const [outer, ...holes] = poly;
-      if (rayCast(outer)) {
-        for (const hole of holes) { if (rayCast(hole)) return false; }
-        return true;
+// 1) Stop the browser from navigating away when a file is dropped anywhere.
+['dragover','drop'].forEach(ev =>
+  window.addEventListener(ev, e => { e.preventDefault(); }, { passive:false })
+);
+
+// 2) Utility to extract a File from DataTransfer, preferring images (uses items for Safari)
+function pickFileFromDataTransfer(dt){
+  if (!dt) return null;
+
+  // Prefer items (Safari-friendly)
+  if (dt.items && dt.items.length){
+    for (const it of dt.items){
+      if (it.kind === 'file'){
+        const f = it.getAsFile();
+        if (f && /^image\//i.test(f.type)) return f;   // image first
       }
     }
-    return false;
-  }
-  return false;
-}
-
-function getNameFromProps(props, fallbackLabel = '') {
-  if (!props) return fallbackLabel || '';
-  // try common keys (case-insensitive)
-  const tryKeys = [
-    'ward', 'WARD', 'Ward', 'Ward_No', 'Ward_Name', 'WardCode', 'Ward_Name_En',
-    'beat', 'Beat', 'BEAT', 'Beat_Number', 'Beat_No', 'BeatName', 'Name',
-    'name', 'NAME', 'description', 'Description', 'DESCR', 'Division',
-    'Police_Station', 'PoliceStation', 'PS_Name', 'Police', 'Station', 'Police_Division'
-  ];
-  for (const k of tryKeys) {
-    if (k in props && props[k]) return String(props[k]).trim();
-  }
-  // last resort: first string-like property
-  for (const k in props) {
-    if (typeof props[k] === 'string' && props[k].trim()) return props[k].trim();
-  }
-  return fallbackLabel || '';
-}
-
-function featureAtPoint(collection, lon, lat) {
-  if (!collection) return null;
-  // quick coarse filter via bbox if present
-  for (const ft of collection.features) {
-    const g = ft.geometry;
-    if (!g) continue;
-    const bbox = ft.bbox || collection.bbox;
-    if (Array.isArray(bbox) && bbox.length === 4) {
-      const [minX, minY, maxX, maxY] = bbox;
-      if (lon < minX || lon > maxX || lat < minY || lat > maxY) continue;
+    // Fallback: take the first file item if no explicit image type matched
+    for (const it of dt.items){
+      if (it.kind === 'file'){
+        const f = it.getAsFile();
+        if (f) return f;
+      }
     }
-    if (pointInPolygon(lon, lat, g)) return ft;
   }
+
+  // Fallback to files list
+  if (dt.files && dt.files.length){
+    return [...dt.files].find(x=>/^image\//i.test(x.type)) || dt.files[0];
+  }
+
   return null;
 }
 
-function lookupJurisdiction(lat, lon) {
-  // GeoJSON uses [lon, lat]
-  const LON = Number(lon), LAT = Number(lat);
-  const result = { ward: '', beat: '', ps: '' };
+// 3) Visual affordances
+['dragenter','dragover'].forEach(t => dropArea?.addEventListener(t, e=>{
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+  dropArea.classList.add('dragover');
+}));
+['dragleave','drop'].forEach(t => dropArea?.addEventListener(t, e=>{
+  e.preventDefault();
+  dropArea.classList.remove('dragover');
+}));
 
-  // If beats include wards in their properties, we’ll pull both from beats
-  const beatFt = featureAtPoint(GEO.beats, LON, LAT);
-  if (beatFt) {
-    result.beat = getNameFromProps(beatFt.properties, 'Beat');
-    // Try to derive ward from beat props if available
-    const wardFromBeat = getNameFromProps(
-      pick(beatFt.properties, ['ward','Ward','WARD','Ward_Name','description']),
-      ''
-    );
-    if (wardFromBeat && !/beat/i.test(wardFromBeat)) result.ward = wardFromBeat;
+// 4) Click/keyboard to open file picker
+dropArea?.addEventListener('click', ()=> fileInput?.click());
+dropArea?.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') fileInput?.click();
+});
+
+// 5) Make re-selecting the same file re-trigger change
+fileInput?.addEventListener('click', e => { e.target.value = ''; });
+
+// 6) Handle file chooser
+fileInput?.addEventListener('change', e => {
+  const f = e.target.files?.[0];
+  if (f) acceptAndHandleFile(f);
+});
+
+// 7) Handle drop
+dropArea?.addEventListener('drop', e => {
+  const f = pickFileFromDataTransfer(e.dataTransfer);
+  if (f) acceptAndHandleFile(f);
+});
+
+// 8) Central acceptance + HEIC handling
+async function acceptAndHandleFile(file){
+  // Some Macs produce HEIC; Safari may read it, but canvas/other browsers won’t.
+  const isHeic = /image\/hei[cf]|\.heic$/i.test(file.type) || /\.heic$/i.test(file.name || '');
+
+  if (isHeic){
+    banner('HEIC detected. Please export as JPG/PNG from Photos (File → Export) or change camera format (Most Compatible).', 'error');
+    setPill('upload', 'err');
+    return;
   }
 
-  // If ward still empty, try wards layer
-  if (!result.ward) {
-    const wardFt = featureAtPoint(GEO.wards, LON, LAT);
-    if (wardFt) result.ward = getNameFromProps(wardFt.properties, 'Ward');
+  if (!/^image\/(jpe?g|png|gif|bmp|webp)$/i.test(file.type)){
+    banner('Please choose an image (JPG/PNG).', 'error');
+    setPill('upload', 'err');
+    return;
   }
 
-  // Police station
-  const psFt = featureAtPoint(GEO.police, LON, LAT);
-  if (psFt) result.ps = getNameFromProps(psFt.properties, 'Police Station');
-
-  return result;
+  // proceed
+  handleFile(file);
 }
 
-function pick(obj, keys) {
-  const out = {};
-  if (!obj) return out;
-  for (const k of keys) if (k in obj) out[k] = obj[k];
+/* ---------- Main flow ---------- */
+async function handleFile(file){
+  if(!/^image\/(jpe?g|png)$/i.test(file.type)){ banner('Please choose a JPG or PNG.','error'); return; }
+
+  resetOutputs();
+
+  // Upload
+  setPill('upload','run');
+  const dataURL = await fileToDataURL(file);
+  imgOriginal && (imgOriginal.src = dataURL);
+  setPill('upload','ok');
+
+  // Crop + Preprocess
+  setPill('ocr','run');
+  let cropURL=''; let processed='';
+  try{
+    cropURL = await cropHud(dataURL);
+    processed = await preprocessForOCR(cropURL);
+    imgCrop && (imgCrop.src = processed);
+  }catch(e){
+    setPill('ocr','err'); banner('Crop/Preprocess failed.','error'); logToConsole('',{error:String(e)},'[Preprocess error]'); return;
+  }
+
+  // OCR
+  if(!(window.Tesseract && Tesseract.recognize)){
+    setPill('ocr','err'); banner('OCR engine not loaded (CDN).','error'); return;
+  }
+  let rawText='';
+  try{
+    const res = await Tesseract.recognize(
+      processed,
+      'eng',
+      { logger:()=>{}, tessedit_pageseg_mode:6, tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789:+.,/°- ' }
+    );
+    rawText = (res?.data?.text || '').trim();
+    logToConsole(rawText, null, '[OCR complete]');
+    setPill('ocr','ok');
+  }catch(e){
+    setPill('ocr','err'); banner('OCR failed. Try clearer photo.','error'); logToConsole('',{error:String(e)},'[OCR error]'); return;
+  }
+
+  // Parse
+  setPill('parse','run');
+  const parsed = parseHudText(rawText);
+  logToConsole(rawText, parsed, '[Parse complete]');
+  if(!parsed.date || !parsed.time || isNaN(parsed.lat) || isNaN(parsed.lon) || !parsed.address){
+    setPill('parse','err'); banner('Could not parse all fields from HUD.','error'); return;
+  }
+  setPill('parse','ok');
+
+  // Show parsed values (raw)
+  outDate && (outDate.textContent = parsed.date);
+  outTime && (outTime.textContent = parsed.time);
+  outLat  && (outLat.textContent  = parsed.lat.toFixed(6));
+  outLon  && (outLon.textContent  = parsed.lon.toFixed(6));
+  outAddr && (outAddr.textContent = parsed.address);
+
+  // Geo
+  setPill('geo','run');
+  try{ await ensureGeo(); }catch{ setPill('geo','err'); banner('Failed to load GeoJSON.','error'); return; }
+  const gj = geoLookup(parsed.lat, parsed.lon);
+  if(!gj.ward || !gj.beat || !gj.ps){ setPill('geo','err'); banner('GeoJSON lookup failed.','error'); return; }
+  outWard && (outWard.textContent = gj.ward);
+  outBeat && (outBeat.textContent = gj.beat);
+  outPS   && (outPS.textContent   = gj.ps);
+  setPill('geo','ok');
+
+  setPill('review','ok');
+
+  // Normalize for prefill (YYYY-MM-DD / HH:mm 24h)
+  const { date: formDate, time: formTime } = normalizeFormRedirect(parsed.date, parsed.time);
+  outDate && (outDate.textContent = formDate);
+  outTime && (outTime.textContent = formTime);
+  logToConsole('', {date: formDate, time: formTime}, '[Prefill normalized → YYYY-MM-DD + HH:mm]');
+
+  // Build URL
+  const url = new URL(FORM_BASE);
+  url.searchParams.set(ENTRY.date, formDate);
+  url.searchParams.set(ENTRY.time, formTime);
+  url.searchParams.set(ENTRY.lat,  parsed.lat.toFixed(6));
+  url.searchParams.set(ENTRY.lon,  parsed.lon.toFixed(6));
+  url.searchParams.set(ENTRY.ward, gj.ward);
+  url.searchParams.set(ENTRY.beat, gj.beat);
+  url.searchParams.set(ENTRY.addr, parsed.address);
+  url.searchParams.set(ENTRY.ps,   gj.ps);
+
+  lastRedirectUrl = url.toString();
+
+  try{
+    setPill('redirect','run');
+    window.open(lastRedirectUrl, '_blank', 'noopener');
+    setPill('redirect','ok');
+  }catch{
+    setPill('redirect','err');
+    banner('Auto-redirect blocked. Tap the Redirect pill to open.', 'error');
+  }
+
+  // Make Redirect pill clickable + pulse
+  if (pills.redirect){
+    pills.redirect.classList.add('pulse','ok');
+    pills.redirect.onclick = () => { if (lastRedirectUrl) window.open(lastRedirectUrl, '_blank', 'noopener'); };
+    pills.redirect.title = 'Open Google Form';
+  }
+}
+
+/* ---------- Parsing ---------- */
+function parseHudText(raw){
+  let lines = raw.split(/\n/).map(s=>s.trim()).filter(Boolean);
+
+  // Start near location line if present
+  const locIdx = lines.findIndex(l => /(India|Maharashtra|Mumbai|Navi Mumbai)/i.test(l));
+  if (locIdx > 0) lines = lines.slice(locIdx);
+  if (lines.length < 3) return {};
+
+  const last = lines[lines.length - 1];
+  const prev = lines[lines.length - 2];
+
+  // Address above the last 2 lines
+  let addr  = lines.slice(0, lines.length - 2).join(', ');
+  addr = addr
+    .replace(/GPS\s*Map\s*Camera/gi,' ')
+    .replace(/\s*,\s*,+/g,', ')
+    .replace(/\s{2,}/g,' ')
+    .replace(/^[,\s]+|[,\s]+$/g,'')
+    .trim();
+
+  // Lat/Lon primary attempt from 'prev'
+  let lat = NaN, lon = NaN;
+  const scrubPrev = prev.replace(/[|]/g,' ').replace(/°/g,' ').replace(/,\s*/g,' ');
+  const m = scrubPrev.match(/(-?\d{1,2}\.\d+).+?(-?\d{1,3}\.\d+)/);
+  if (m){ lat = parseFloat(m[1]); lon = parseFloat(m[2]); }
+
+  // Fallback: scan whole raw for two decimals in Mumbai bounds
+  if (isNaN(lat) || isNaN(lon)) {
+    const allNums = (raw.match(/-?\d{1,3}\.\d+/g) || []).map(parseFloat);
+    for (let i=0;i<allNums.length-1;i++){
+      const a = allNums[i], b = allNums[i+1];
+      const latLike = (a>=17 && a<=21), lonLike = (b>=72 && b<=75);
+      if (latLike && lonLike){ lat=a; lon=b; break; }
+    }
+  }
+
+  // Date & Time
+  const pool = [last, `${prev} ${last}`];
+  let date = '', time = '';
+  for (const s of pool){
+    if (!date){
+      const m1 = s.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})/); // dd/mm/yyyy
+      const m2 = s.match(/(\d{4}[\/-]\d{1,2}[\/-]\d{1,2})/); // yyyy-mm-dd
+      if (m1) date = m1[1]; else if (m2) date = m2[1];
+    }
+    if (!time){
+      const t1 = s.match(/(\d{1,2}):(\d{2})\s*([AP]M)/i);   // 12h
+      const t2 = s.match(/(\d{1,2}):(\d{2})(?!\s*[AP]M)/i); // 24h
+      if (t1) time = `${t1[1]}:${t1[2]} ${t1[3].toUpperCase()}`;
+      else if (t2) time = `${t2[1]}:${t2[2]}`;
+    }
+  }
+
+  return { address: addr, lat, lon, date, time };
+}
+
+/* ---------- Prefill: YYYY-MM-DD & HH:mm (24h) ---------- */
+function pad2(n){ return n<10 ? '0'+n : String(n); }
+function normalizeFormRedirect(dateStr, timeStr){
+  // DATE
+  let yyyy, mm, dd;
+  let m1 = (dateStr||'').match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/); // dd/mm/yyyy
+  let m2 = (dateStr||'').match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/); // yyyy-mm-dd
+  if (m1){ dd=+m1[1]; mm=+m1[2]; yyyy=+m1[3]; }
+  else if (m2){ yyyy=+m2[1]; mm=+m2[2]; dd=+m2[3]; }
+  const formDate = (yyyy && mm && dd) ? `${yyyy}-${pad2(mm)}-${pad2(dd)}` : (dateStr||'');
+
+  // TIME
+  let HH, Min;
+  const t12 = (timeStr||'').match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  const t24 = (timeStr||'').match(/^(\d{1,2}):(\d{2})$/);
+  if (t12){
+    let h = +t12[1]; Min = t12[2]; const ap = t12[3].toUpperCase();
+    if (ap === 'AM'){ HH = (h===12) ? 0 : h; }
+    else { HH = (h===12) ? 12 : h+12; }
+  } else if (t24){
+    HH = +t24[1]; Min = t24[2];
+  }
+  const formTime = (HH!=null && Min!=null) ? `${pad2(HH)}:${Min}` : (timeStr||'');
+
+  return { date: formDate, time: formTime };
+}
+
+/* ---------- Geo (Single Beats + Ward, plus Police) ---------- */
+let gjB=null, gjP=null;
+
+/**
+ * ensureGeo()
+ * Loads:
+ * - data/beats.geojson  → features include both Beat & Ward in properties
+ * - data/police_jurisdiction.geojson
+ */
+async function ensureGeo(){
+  if(gjB && gjP) return;
+  const [beats, police] = await Promise.all([
+    fetch('data/beats.geojson').then(r=>{ if(!r.ok) throw new Error('beats.geojson'); return r.json(); }),
+    fetch('data/police_jurisdiction.geojson').then(r=>{ if(!r.ok) throw new Error('police_jurisdiction.geojson'); return r.json(); })
+  ]);
+  gjB = beats; gjP = police;
+
+  const geoBadge = $('geoBadge');
+  if (geoBadge) {
+    const ok = (gjB?.features?.length>0) && (gjP?.features?.length>0);
+    geoBadge.className = `badge ${ ok ? 'badge-ok glow' : 'badge-err glow' }`;
+    geoBadge.textContent = ok ? 'Geo: Ready' : 'Geo: Error';
+  }
+}
+
+/* Point-in-polygon (ray casting) */
+function inPoly(poly,[x,y]){
+  let inside=false;
+  for(const ring of poly){
+    for(let i=0,j=ring.length-1;i<ring.length;j=i++){
+      const xi=ring[i][0], yi=ring[i][1];
+      const xj=ring[j][0], yj=ring[j][1];
+      const intersect=((yi>y)!==(yj>y)) && (x < (xj-xi)*(y-yi)/(yj-yi)+xi);
+      if(intersect) inside=!inside;
+    }
+  }
+  return inside;
+}
+
+/**
+ * geoLookup(lat, lon)
+ * Returns { ward, beat, ps }
+ * - Ward & Beat from gjB (single merged file)
+ * - Police Station from gjP
+ * Property fallbacks included for robustness.
+ */
+function geoLookup(lat, lon){
+  const out = { ward:'', beat:'', ps:'' };
+  if (!gjB || !gjP) return out;
+
+  const pt = [lon, lat];
+  const inG = (g) =>
+    g?.type === 'Polygon' ? inPoly(g.coordinates, pt)
+    : g?.type === 'MultiPolygon' ? g.coordinates.some(r => inPoly(r, pt))
+    : false;
+
+  // Beats (with Ward embedded)
+  for (const f of gjB.features) {
+    if (inG(f.geometry)) {
+      const p = f.properties || {};
+
+      // Pull ward from common keys, now including "description"
+      const wardRaw = p.WARD ?? p.WARD_NAME ?? p.ward ?? p.description ?? p.DESCRIPTION ?? p.NAME ?? p.name ?? '';
+      // Pull beat from common keys; prefer explicit beat fields, else Name/name
+      let beatRaw = p.BEAT_NO ?? p.BEAT ?? p.beat ?? p.NAME ?? p.Name ?? p.name ?? '';
+
+      // Optional: if Name contains patterns like "BEAT 1", keep it tidy
+      if (!p.BEAT_NO && !p.BEAT && typeof beatRaw === 'string') {
+        const m = beatRaw.match(/BEAT\s*\w+/i);
+        if (m) beatRaw = m[0]; // e.g., "BEAT 1"
+      }
+
+      out.ward = String(wardRaw).trim();             // e.g., "R/N"
+      out.beat = String(beatRaw).trim();             // e.g., "BEAT 1"
+      break;
+    }
+  }
+
+  // Police
+  for (const f of gjP.features) {
+    if (inG(f.geometry)) {
+      const p = f.properties || {};
+      out.ps = String(p.PS_NAME ?? p.NAME ?? p.name ?? p.police ?? '').trim();
+      break;
+    }
+  }
+
   return out;
 }
 
-/* ------------------------ Console helpers (Copy/Toggle) ------------------------ */
-$('consoleCopy')?.addEventListener('click', async () => {
-  const pre = $('console-pre'); if (!pre) return;
-  try {
-    await navigator.clipboard.writeText(pre.textContent || '');
-    banner('Console copied to clipboard.', 'success');
-  } catch {
-    banner('Copy failed. Select and copy manually.', 'error');
-  }
-});
-$('consoleToggle')?.addEventListener('click', () => {
-  const pre = $('console-pre'); if (!pre) return;
-  const btn = $('consoleToggle');
-  const hidden = pre.style.display === 'none';
-  pre.style.display = hidden ? 'block' : 'none';
-  btn.setAttribute('aria-expanded', String(hidden));
-  btn.textContent = hidden ? 'Hide' : 'Show';
-});
+/* ---------- Console buttons ---------- */
+document.addEventListener('DOMContentLoaded', () => {
+  const copyBtn = document.getElementById('consoleCopy');
+  const toggleBtn = document.getElementById('consoleToggle');
+  const pre = document.getElementById('console-pre');
 
-/* ------------------------ Kick off Geo load on startup ------------------------ */
-document.addEventListener('DOMContentLoaded', ensureGeoLoaded);
+  copyBtn?.addEventListener('click', () => {
+    if (!pre) return;
+    navigator.clipboard.writeText(pre.textContent || '').then(() => {
+      banner('Console copied.', 'success');
+      setTimeout(()=>banner('', ''), 1200);
+    });
+  });
+
+  toggleBtn?.addEventListener('click', () => {
+    if (!pre) return;
+    const hidden = pre.style.display === 'none';
+    pre.style.display = hidden ? '' : 'none';
+    toggleBtn.setAttribute('aria-expanded', String(hidden));
+    toggleBtn.textContent = hidden ? 'Hide' : 'Show';
+  });
+});
