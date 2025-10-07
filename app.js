@@ -1,9 +1,9 @@
 /* ==========================================================
    Abandoned Vehicles — Marshal Upload (MCGM)
-   Build: v2025.10.07.SMART-CROP
-   - Smart HUD crop (finds the black GPS Map Camera strip)
-   - Left mini-map auto trim via vertical-edge scan
-   - Keeps your existing UI, parsing, geo lookup & prefill
+   Build: v2025.09.25.M1
+   - Single GeoJSON for Beats that also contains Ward info
+   - Police jurisdiction GeoJSON kept separate
+   - Robust OCR + parsing + prefill normalization
    ========================================================== */
 
 const $ = (id) => document.getElementById(id);
@@ -89,208 +89,62 @@ function logToConsole(rawText, parsed, note=''){
 const FORM_BASE='https://docs.google.com/forms/d/e/1FAIpQLSeo-xlOSxvG0IwtO5MkKaTJZNJkgTsmgZUw-FBsntFlNdRnCw/viewform?usp=pp_url';
 const ENTRY={date:'entry.1911996449',time:'entry.1421115881',lat:'entry.419288992',lon:'entry.113122688',ward:'entry.1625337207',beat:'entry.1058310891',addr:'entry.1188611077',ps:'entry.1555105834'};
 
-/* ==========================================================
-   SMART HUD CROP
-   - Detects bottom black strip by luminance scan
-   - Finds left mini-map boundary by vertical edge strength
-   - Falls back to safe defaults if detection is uncertain
-   ========================================================== */
+/* ---------- Static crop ---------- */
+const STATIC_CROP={
+  portrait:{ top:0.755,height:0.235,mapCut:0.205,pad:{top:0.020,bottom:0.018,left:0.028,right:0.024} },
+  landscape:{ top:0.775,height:0.190,mapCut:0.185,pad:{top:0.016,bottom:0.014,left:0.022,right:0.020} }
+};
+const LEFT_RELAX = 0.030;
 
-/* tunables */
-const SCAN_TARGET_W = 512;          // downsample width for analysis
-const DARK_THRESH   = 120;          // row mean ≤ this = “dark”
-const MIN_BAND_PC_P = 0.12;         // min HUD height (portrait) as % of H
-const MIN_BAND_PC_L = 0.10;         // min HUD height (landscape) as % of H
-const LEFT_FALLBACK_P = 0.22;       // fallback left cut (portrait)
-const LEFT_FALLBACK_L = 0.18;       // fallback left cut (landscape)
-const RIGHT_PAD_PC   = 0.02;        // small right pad
-const TOP_EXTRA_PC   = 0.01;        // include a tiny extra above band
-const BOT_KEEP_PC    = 0.00;        // keep full to bottom
-
-function luminance(r,g,b){ return 0.2126*r + 0.7152*g + 0.0722*b; }
-
-function movingAvg(arr, win){
-  const out = new Array(arr.length).fill(0);
-  let sum = 0;
-  for (let i=0;i<arr.length;i++){
-    sum += arr[i];
-    if (i>=win) sum -= arr[i-win];
-    out[i] = sum / Math.min(i+1, win);
-  }
-  return out;
-}
-
-function argMax(arr){
-  let m = -Infinity, idx = -1;
-  for (let i=0;i<arr.length;i++) if (arr[i] > m){ m = arr[i]; idx = i; }
-  return idx;
-}
-
-// === REPLACE ONLY THIS FUNCTION ===
 async function cropHud(dataURL){
-  const img = await loadImage(dataURL);
-  const W   = img.naturalWidth  || img.width;
-  const H   = img.naturalHeight || img.height;
-  const portrait = H >= W;
+  const img=await loadImage(dataURL);
+  const W=img.naturalWidth, H=img.naturalHeight;
+  const isPortrait=H>=W;
+  const P=isPortrait?STATIC_CROP.portrait:STATIC_CROP.landscape;
 
-  // ---- analysis size ----
-  const SCAN_W = 640;
-  const scale  = Math.min(1, SCAN_W / W);
-  const aW = Math.round(W * scale);
-  const aH = Math.round(H * scale);
+  let sy=Math.floor(H*P.top);
+  let sh=Math.floor(H*P.height);
+  sy = Math.max(0, sy - Math.floor(H*P.pad.top));
+  sh = Math.min(H - sy, sh + Math.floor(H*(P.pad.top + P.pad.bottom)));
 
-  const a = document.createElement('canvas');
-  a.width = aW; a.height = aH;
-  const g = a.getContext('2d', { willReadFrequently: true });
-  g.drawImage(img, 0, 0, aW, aH);
-  const px = g.getImageData(0, 0, aW, aH).data;
+  let sx=Math.floor(W*(P.mapCut + P.pad.left - LEFT_RELAX));
+  let sw=W - sx - Math.floor(W*P.pad.right);
+  if (sx<0) sx=0;
+  if (sy<0) sy=0;
+  if (sx+sw>W) sw=W-sx;
+  if (sy+sh>H) sh=H-sy;
 
-  // ---- compute "blackness" per row over bottom 70% ----
-  const startRow = Math.floor(aH * 0.30);
-  const rows = aH - startRow;
-  const DARK_Y = 110;
-
-  const blackFrac = new Float32Array(rows);
-  for (let y = startRow; y < aH; y++){
-    let black = 0, off = y * aW * 4;
-    for (let x = 0; x < aW; x++){
-      const i = off + x*4;
-      const Y = 0.2126*px[i] + 0.7152*px[i+1] + 0.0722*px[i+2];
-      if (Y <= DARK_Y) black++;
-    }
-    blackFrac[y - startRow] = black / aW;
-  }
-  // smooth (window=5)
-  const sm = new Float32Array(rows);
-  let acc=0; const WIN=5;
-  for (let i=0;i<rows;i++){ acc+=blackFrac[i]; if(i>=WIN) acc-=blackFrac[i-WIN]; sm[i]=acc/Math.min(i+1,WIN); }
-
-  // ---- find dark band [top..bottom] using hysteresis ----
-  const HI = 0.72, LO = 0.50;
-  const minBand = Math.round((portrait ? 0.12 : 0.10) * aH);
-
-  const segs=[];
-  let i=0;
-  while (i<rows){
-    while (i<rows && sm[i] < HI) i++;
-    if (i>=rows) break;
-    const s=i;
-    while (i<rows && sm[i] >= LO) i++;
-    const e=i-1;
-    if ((startRow+e) > aH*0.60) segs.push({s,e});
-  }
-  segs.sort((A,B)=> (B.e-A.e) || ((B.e-B.s)-(A.e-A.s)));
-  let best = segs[0];
-
-  if (!best){
-    const topP = portrait ? 0.78 : 0.80;
-    const botP = portrait ? 0.93 : 0.92;
-    best = { s: Math.round(aH*topP)-startRow, e: Math.round(aH*botP)-startRow };
-  }
-  if ((best.e - best.s + 1) < minBand){
-    best.s = Math.max(0, best.e - minBand);
-  }
-
-  // convert to original coords
-  const bandTopY = Math.round((startRow + best.s) / scale);
-  const bandBotY = Math.round((startRow + best.e) / scale);
-
-  // Pads
-  const TOP_PAD        = Math.round(H * 0.003);
-  const BOTTOM_SHRINK  = Math.round(H * 0.012);
-
-  const top    = Math.max(0, bandTopY - TOP_PAD);
-  const bottom = Math.max(top+6, Math.min(H, bandBotY - BOTTOM_SHRINK));
-
-  // ---- left trim: detect mini-map or keep small margin ----
-  const scanTop = Math.max(Math.round((startRow + best.s) * 1.0), 0);
-  const scanBot = Math.min(Math.round((startRow + best.e) * 1.0), aH-1);
-  const scanCols = Math.round(aW * 0.40);   // cap to 45% so we never cut into text
-
-  // Stats for left 18% of band (map area if present)
-  const x0 = 0, x1 = Math.max(1, Math.round(aW * 0.18));
-  let n=0, sum=0, sumsq=0;
-  for (let y=scanTop; y<=scanBot; y++){
-    for (let x=x0; x<x1; x++){
-      const k = (y*aW + x)*4;
-      const Y = 0.2126*px[k] + 0.7152*px[k+1] + 0.0722*px[k+2];
-      sum += Y; sumsq += Y*Y; n++;
-    }
-  }
-  const mean = sum / Math.max(1, n);
-  const variance = Math.max(0, sumsq/Math.max(1,n) - mean*mean);
-  const stdDev = Math.sqrt(variance);
-
-  // Heuristic: mini-map exists if left band is not very dark AND highly textured
-  const hasMiniMap = (mean > 35) && (stdDev > 22);
-
-  // vertical edge strength (inside left 45% only)
-  const colMean = (x) => {
-    let s = 0;
-    for (let y = scanTop; y <= scanBot; y++){
-      const idx = (y * aW + x) * 4;
-      s += 0.2126*px[idx] + 0.7152*px[idx+1] + 0.0722*px[idx+2];
-    }
-    return s / (scanBot - scanTop + 1);
-  };
-  let prev = colMean(0);
-  const edge = new Float32Array(Math.max(1, scanCols-1));
-  for (let x=1; x<scanCols; x++){ const cur=colMean(x); edge[x-1]=Math.abs(cur-prev); prev=cur; }
-  for (let k=2; k<edge.length-2; k++){ edge[k]=(edge[k-2]+edge[k-1]+edge[k]+edge[k+1]+edge[k+2])/5; }
-
-  // robust threshold using median
-  const sorted = Array.from(edge).sort((a,b)=>a-b);
-  const med = sorted[Math.floor(sorted.length*0.5)] || 0;
-  let maxVal=-1, maxIdx=-1;
-  for (let x=Math.floor(edge.length*0.01); x<edge.length; x++){
-    if (edge[x] > maxVal){ maxVal=edge[x]; maxIdx=x; }
-  }
-  const strongEdge = maxVal > (med * 3.0);
-
-  // baseline small margin when no map / weak edge
-  const NO_MAP_LEFT_FRAC = 0.015;                // keep small margin
-  let leftFrac = NO_MAP_LEFT_FRAC;
-
-  if (hasMiniMap && strongEdge && maxIdx > 8){
-    // Map detected → cut at edge (with small margin), but never beyond 28%
-    const edgeFrac = (maxIdx + 4) / aW;
-    leftFrac = Math.min(0.28, Math.max(0.06, edgeFrac));
-  }
-
-  const RIGHT_PAD_FRAC = 0.02;
-  const leftCut = Math.max(0, Math.round(W * leftFrac));
-  const rightPad = Math.round(W * RIGHT_PAD_FRAC);
-
-  const sx = leftCut;
-  const sy = top;
-  const sw = Math.max(1, W - leftCut - rightPad);
-  const sh = Math.max(1, bottom - top);
-
-  const c = document.createElement('canvas');
-  c.width = sw; c.height = sh;
-  c.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-
-  logToConsole('', {W,H,sx,sy,sw,sh,leftFrac:+leftFrac.toFixed(3), hasMiniMap, stdDev:+stdDev.toFixed(1), mean:+mean.toFixed(1)}, '[Smart HUD crop v4]');
+  const c=document.createElement('canvas');
+  c.width=sw; c.height=sh;
+  c.getContext('2d').drawImage(img, sx,sy,sw,sh, 0,0,sw,sh);
   return c.toDataURL('image/png');
 }
 
-/* ---------- Preprocess (light binarize/upscale) ---------- */
+/* ---------- Preprocess (light) ---------- */
 async function preprocessForOCR(cropDataURL){
   const src=await loadImage(cropDataURL);
   const w=src.naturalWidth, h=src.naturalHeight;
 
-  // Keep entire cropped band (we already trimmed the map and found the HUD)
+  const cutTop=Math.floor(h*0.18);
+  const cutBottom=Math.floor(h*0.04);
+  const h2=h - cutTop - cutBottom;
+
+  const c=document.createElement('canvas');
+  c.width=w; c.height=h2;
+  const ctx=c.getContext('2d',{willReadFrequently:true});
+  ctx.drawImage(src, 0, -cutTop, w, h);
+
   const up=document.createElement('canvas');
-  up.width=w*2; up.height=h*2;
+  up.width=c.width*3; up.height=c.height*3;
   const uctx=up.getContext('2d');
   uctx.imageSmoothingEnabled=true;
-  uctx.drawImage(src,0,0,up.width,up.height);
+  uctx.drawImage(c,0,0,up.width,up.height);
 
   let im = uctx.getImageData(0,0,up.width,up.height);
   const d=im.data;
   for(let i=0;i<d.length;i+=4){
-    const y = (0.2126*d[i] + 0.7152*d[i+1] + 0.0722*d[i+2]);
-    const v = y>135?255:0;             // binary for white text on black
+    const avg=(d[i]+d[i+1]+d[i+2])/3;
+    const v = avg>140?255:0;
     d[i]=d[i+1]=d[i+2]=v; d[i+3]=255;
   }
   uctx.putImageData(im,0,0);
@@ -299,18 +153,25 @@ async function preprocessForOCR(cropDataURL){
 }
 
 /* ---------- Drag & drop (macOS/Safari-safe) ---------- */
+
+// 1) Stop the browser from navigating away when a file is dropped anywhere.
 ['dragover','drop'].forEach(ev =>
   window.addEventListener(ev, e => { e.preventDefault(); }, { passive:false })
 );
+
+// 2) Utility to extract a File from DataTransfer, preferring images (uses items for Safari)
 function pickFileFromDataTransfer(dt){
   if (!dt) return null;
+
+  // Prefer items (Safari-friendly)
   if (dt.items && dt.items.length){
     for (const it of dt.items){
       if (it.kind === 'file'){
         const f = it.getAsFile();
-        if (f && /^image\//i.test(f.type)) return f;
+        if (f && /^image\//i.test(f.type)) return f;   // image first
       }
     }
+    // Fallback: take the first file item if no explicit image type matched
     for (const it of dt.items){
       if (it.kind === 'file'){
         const f = it.getAsFile();
@@ -318,11 +179,16 @@ function pickFileFromDataTransfer(dt){
       }
     }
   }
+
+  // Fallback to files list
   if (dt.files && dt.files.length){
     return [...dt.files].find(x=>/^image\//i.test(x.type)) || dt.files[0];
   }
+
   return null;
 }
+
+// 3) Visual affordances
 ['dragenter','dragover'].forEach(t => dropArea?.addEventListener(t, e=>{
   e.preventDefault();
   if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
@@ -332,18 +198,46 @@ function pickFileFromDataTransfer(dt){
   e.preventDefault();
   dropArea.classList.remove('dragover');
 }));
-dropArea?.addEventListener('click', ()=> fileInput?.click());
-dropArea?.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') fileInput?.click(); });
-fileInput?.addEventListener('click', e => { e.target.value = ''; });
-fileInput?.addEventListener('change', e => { const f = e.target.files?.[0]; if (f) acceptAndHandleFile(f); });
-dropArea?.addEventListener('drop', e => { const f = pickFileFromDataTransfer(e.dataTransfer); if (f) acceptAndHandleFile(f); });
 
+// 4) Click/keyboard to open file picker
+dropArea?.addEventListener('click', ()=> fileInput?.click());
+dropArea?.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') fileInput?.click();
+});
+
+// 5) Make re-selecting the same file re-trigger change
+fileInput?.addEventListener('click', e => { e.target.value = ''; });
+
+// 6) Handle file chooser
+fileInput?.addEventListener('change', e => {
+  const f = e.target.files?.[0];
+  if (f) acceptAndHandleFile(f);
+});
+
+// 7) Handle drop
+dropArea?.addEventListener('drop', e => {
+  const f = pickFileFromDataTransfer(e.dataTransfer);
+  if (f) acceptAndHandleFile(f);
+});
+
+// 8) Central acceptance + HEIC handling
 async function acceptAndHandleFile(file){
+  // Some Macs produce HEIC; Safari may read it, but canvas/other browsers won’t.
   const isHeic = /image\/hei[cf]|\.heic$/i.test(file.type) || /\.heic$/i.test(file.name || '');
-  if (isHeic){ banner('HEIC detected. Please export as JPG/PNG.', 'error'); setPill('upload','err'); return; }
-  if (!/^image\/(jpe?g|png|gif|bmp|webp)$/i.test(file.type)){
-    banner('Please choose an image (JPG/PNG).', 'error'); setPill('upload','err'); return;
+
+  if (isHeic){
+    banner('HEIC detected. Please export as JPG/PNG from Photos (File → Export) or change camera format (Most Compatible).', 'error');
+    setPill('upload', 'err');
+    return;
   }
+
+  if (!/^image\/(jpe?g|png|gif|bmp|webp)$/i.test(file.type)){
+    banner('Please choose an image (JPG/PNG).', 'error');
+    setPill('upload', 'err');
+    return;
+  }
+
+  // proceed
   handleFile(file);
 }
 
@@ -363,7 +257,7 @@ async function handleFile(file){
   setPill('ocr','run');
   let cropURL=''; let processed='';
   try{
-    cropURL = await cropHud(dataURL);          // << smart crop
+    cropURL = await cropHud(dataURL);
     processed = await preprocessForOCR(cropURL);
     imgCrop && (imgCrop.src = processed);
   }catch(e){
@@ -416,7 +310,7 @@ async function handleFile(file){
 
   setPill('review','ok');
 
-  // Normalize for prefill
+  // Normalize for prefill (YYYY-MM-DD / HH:mm 24h)
   const { date: formDate, time: formTime } = normalizeFormRedirect(parsed.date, parsed.time);
   outDate && (outDate.textContent = formDate);
   outTime && (outTime.textContent = formTime);
@@ -444,6 +338,7 @@ async function handleFile(file){
     banner('Auto-redirect blocked. Tap the Redirect pill to open.', 'error');
   }
 
+  // Make Redirect pill clickable + pulse
   if (pills.redirect){
     pills.redirect.classList.add('pulse','ok');
     pills.redirect.onclick = () => { if (lastRedirectUrl) window.open(lastRedirectUrl, '_blank', 'noopener'); };
@@ -451,9 +346,11 @@ async function handleFile(file){
   }
 }
 
-/* ---------- Parsing (unchanged) ---------- */
+/* ---------- Parsing ---------- */
 function parseHudText(raw){
   let lines = raw.split(/\n/).map(s=>s.trim()).filter(Boolean);
+
+  // Start near location line if present
   const locIdx = lines.findIndex(l => /(India|Maharashtra|Mumbai|Navi Mumbai)/i.test(l));
   if (locIdx > 0) lines = lines.slice(locIdx);
   if (lines.length < 3) return {};
@@ -470,13 +367,13 @@ function parseHudText(raw){
     .replace(/^[,\s]+|[,\s]+$/g,'')
     .trim();
 
-  // Lat/Lon from prev line (primary)
+  // Lat/Lon primary attempt from 'prev'
   let lat = NaN, lon = NaN;
   const scrubPrev = prev.replace(/[|]/g,' ').replace(/°/g,' ').replace(/,\s*/g,' ');
   const m = scrubPrev.match(/(-?\d{1,2}\.\d+).+?(-?\d{1,3}\.\d+)/);
   if (m){ lat = parseFloat(m[1]); lon = parseFloat(m[2]); }
 
-  // Fallback: scan whole raw
+  // Fallback: scan whole raw for two decimals in Mumbai bounds
   if (isNaN(lat) || isNaN(lon)) {
     const allNums = (raw.match(/-?\d{1,3}\.\d+/g) || []).map(parseFloat);
     for (let i=0;i<allNums.length-1;i++){
@@ -491,13 +388,13 @@ function parseHudText(raw){
   let date = '', time = '';
   for (const s of pool){
     if (!date){
-      const m1 = s.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})/);
-      const m2 = s.match(/(\d{4}[\/-]\d{1,2}[\/-]\d{1,2})/);
+      const m1 = s.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})/); // dd/mm/yyyy
+      const m2 = s.match(/(\d{4}[\/-]\d{1,2}[\/-]\d{1,2})/); // yyyy-mm-dd
       if (m1) date = m1[1]; else if (m2) date = m2[1];
     }
     if (!time){
-      const t1 = s.match(/(\d{1,2}):(\d{2})\s*([AP]M)/i);
-      const t2 = s.match(/(\d{1,2}):(\d{2})(?!\s*[AP]M)/i);
+      const t1 = s.match(/(\d{1,2}):(\d{2})\s*([AP]M)/i);   // 12h
+      const t2 = s.match(/(\d{1,2}):(\d{2})(?!\s*[AP]M)/i); // 24h
       if (t1) time = `${t1[1]}:${t1[2]} ${t1[3].toUpperCase()}`;
       else if (t2) time = `${t2[1]}:${t2[2]}`;
     }
@@ -509,13 +406,15 @@ function parseHudText(raw){
 /* ---------- Prefill: YYYY-MM-DD & HH:mm (24h) ---------- */
 function pad2(n){ return n<10 ? '0'+n : String(n); }
 function normalizeFormRedirect(dateStr, timeStr){
+  // DATE
   let yyyy, mm, dd;
-  let m1 = (dateStr||'').match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
-  let m2 = (dateStr||'').match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/);
+  let m1 = (dateStr||'').match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/); // dd/mm/yyyy
+  let m2 = (dateStr||'').match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/); // yyyy-mm-dd
   if (m1){ dd=+m1[1]; mm=+m1[2]; yyyy=+m1[3]; }
   else if (m2){ yyyy=+m2[1]; mm=+m2[2]; dd=+m2[3]; }
   const formDate = (yyyy && mm && dd) ? `${yyyy}-${pad2(mm)}-${pad2(dd)}` : (dateStr||'');
 
+  // TIME
   let HH, Min;
   const t12 = (timeStr||'').match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
   const t24 = (timeStr||'').match(/^(\d{1,2}):(\d{2})$/);
@@ -527,11 +426,19 @@ function normalizeFormRedirect(dateStr, timeStr){
     HH = +t24[1]; Min = t24[2];
   }
   const formTime = (HH!=null && Min!=null) ? `${pad2(HH)}:${Min}` : (timeStr||'');
+
   return { date: formDate, time: formTime };
 }
 
-/* ---------- Geo (same behavior) ---------- */
+/* ---------- Geo (Single Beats + Ward, plus Police) ---------- */
 let gjB=null, gjP=null;
+
+/**
+ * ensureGeo()
+ * Loads:
+ * - data/beats.geojson  → features include both Beat & Ward in properties
+ * - data/police_jurisdiction.geojson
+ */
 async function ensureGeo(){
   if(gjB && gjP) return;
   const [beats, police] = await Promise.all([
@@ -547,6 +454,8 @@ async function ensureGeo(){
     geoBadge.textContent = ok ? 'Geo: Ready' : 'Geo: Error';
   }
 }
+
+/* Point-in-polygon (ray casting) */
 function inPoly(poly,[x,y]){
   let inside=false;
   for(const ring of poly){
@@ -559,30 +468,47 @@ function inPoly(poly,[x,y]){
   }
   return inside;
 }
+
+/**
+ * geoLookup(lat, lon)
+ * Returns { ward, beat, ps }
+ * - Ward & Beat from gjB (single merged file)
+ * - Police Station from gjP
+ * Property fallbacks included for robustness.
+ */
 function geoLookup(lat, lon){
   const out = { ward:'', beat:'', ps:'' };
   if (!gjB || !gjP) return out;
+
   const pt = [lon, lat];
   const inG = (g) =>
     g?.type === 'Polygon' ? inPoly(g.coordinates, pt)
     : g?.type === 'MultiPolygon' ? g.coordinates.some(r => inPoly(r, pt))
     : false;
 
+  // Beats (with Ward embedded)
   for (const f of gjB.features) {
     if (inG(f.geometry)) {
       const p = f.properties || {};
+
+      // Pull ward from common keys, now including "description"
       const wardRaw = p.WARD ?? p.WARD_NAME ?? p.ward ?? p.description ?? p.DESCRIPTION ?? p.NAME ?? p.name ?? '';
+      // Pull beat from common keys; prefer explicit beat fields, else Name/name
       let beatRaw = p.BEAT_NO ?? p.BEAT ?? p.beat ?? p.NAME ?? p.Name ?? p.name ?? '';
+
+      // Optional: if Name contains patterns like "BEAT 1", keep it tidy
       if (!p.BEAT_NO && !p.BEAT && typeof beatRaw === 'string') {
         const m = beatRaw.match(/BEAT\s*\w+/i);
-        if (m) beatRaw = m[0];
+        if (m) beatRaw = m[0]; // e.g., "BEAT 1"
       }
-      out.ward = String(wardRaw).trim();
-      out.beat = String(beatRaw).trim();
+
+      out.ward = String(wardRaw).trim();             // e.g., "R/N"
+      out.beat = String(beatRaw).trim();             // e.g., "BEAT 1"
       break;
     }
   }
 
+  // Police
   for (const f of gjP.features) {
     if (inG(f.geometry)) {
       const p = f.properties || {};
@@ -590,6 +516,7 @@ function geoLookup(lat, lon){
       break;
     }
   }
+
   return out;
 }
 
@@ -602,7 +529,8 @@ document.addEventListener('DOMContentLoaded', () => {
   copyBtn?.addEventListener('click', () => {
     if (!pre) return;
     navigator.clipboard.writeText(pre.textContent || '').then(() => {
-      banner('Console copied.', 'success'); setTimeout(()=>banner('', ''), 1200);
+      banner('Console copied.', 'success');
+      setTimeout(()=>banner('', ''), 1200);
     });
   });
 
