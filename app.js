@@ -101,8 +101,8 @@ const SCAN_TARGET_W = 512;          // downsample width for analysis
 const DARK_THRESH   = 120;          // row mean ≤ this = “dark”
 const MIN_BAND_PC_P = 0.12;         // min HUD height (portrait) as % of H
 const MIN_BAND_PC_L = 0.10;         // min HUD height (landscape) as % of H
-const LEFT_FALLBACK_P = 0.22;       // fallback left cut (portrait)
-const LEFT_FALLBACK_L = 0.18;       // fallback left cut (landscape)
+const LEFT_FALLBACK_P = 0.15;       // fallback left cut (portrait)
+const LEFT_FALLBACK_L = 0.13;       // fallback left cut (landscape)
 const RIGHT_PAD_PC   = 0.02;        // small right pad
 const TOP_EXTRA_PC   = 0.01;        // include a tiny extra above band
 const BOT_KEEP_PC    = 0.00;        // keep full to bottom
