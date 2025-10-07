@@ -205,7 +205,7 @@ async function cropHud(dataURL){
   // ---- left trim: detect mini-map or keep small margin ----
   const scanTop = Math.max(Math.round((startRow + best.s) * 1.0), 0);
   const scanBot = Math.min(Math.round((startRow + best.e) * 1.0), aH-1);
-  const scanCols = Math.round(aW * 0.45);   // cap to 45% so we never cut into text
+  const scanCols = Math.round(aW * 0.40);   // cap to 45% so we never cut into text
 
   // Stats for left 18% of band (map area if present)
   const x0 = 0, x1 = Math.max(1, Math.round(aW * 0.18));
@@ -245,16 +245,16 @@ async function cropHud(dataURL){
   for (let x=Math.floor(edge.length*0.01); x<edge.length; x++){
     if (edge[x] > maxVal){ maxVal=edge[x]; maxIdx=x; }
   }
-  const strongEdge = maxVal > (med * 2.2);
+  const strongEdge = maxVal > (med * 3.0);
 
   // baseline small margin when no map / weak edge
-  const NO_MAP_LEFT_FRAC = 0.04;                // keep small margin
+  const NO_MAP_LEFT_FRAC = 0.015;                // keep small margin
   let leftFrac = NO_MAP_LEFT_FRAC;
 
   if (hasMiniMap && strongEdge && maxIdx > 8){
     // Map detected → cut at edge (with small margin), but never beyond 28%
-    const edgeFrac = (maxIdx + 8) / aW;
-    leftFrac = Math.min(0.28, Math.max(0.12, edgeFrac));
+    const edgeFrac = (maxIdx + 4) / aW;
+    leftFrac = Math.min(0.28, Math.max(0.06, edgeFrac));
   }
 
   const RIGHT_PAD_FRAC = 0.02;
