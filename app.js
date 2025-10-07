@@ -101,8 +101,8 @@ const SCAN_TARGET_W = 512;          // downsample width for analysis
 const DARK_THRESH   = 120;          // row mean ≤ this = “dark”
 const MIN_BAND_PC_P = 0.12;         // min HUD height (portrait) as % of H
 const MIN_BAND_PC_L = 0.10;         // min HUD height (landscape) as % of H
-const LEFT_FALLBACK_P = 0.15;       // fallback left cut (portrait)
-const LEFT_FALLBACK_L = 0.13;       // fallback left cut (landscape)
+const LEFT_FALLBACK_P = 0.22;       // fallback left cut (portrait)
+const LEFT_FALLBACK_L = 0.18;       // fallback left cut (landscape)
 const RIGHT_PAD_PC   = 0.02;        // small right pad
 const TOP_EXTRA_PC   = 0.01;        // include a tiny extra above band
 const BOT_KEEP_PC    = 0.00;        // keep full to bottom
@@ -126,7 +126,7 @@ function argMax(arr){
   return idx;
 }
 
-// === REPLACE ONLY THIS FUNCTION IN app.js ===
+// === REPLACE ONLY THIS FUNCTION ===
 async function cropHud(dataURL){
   const img = await loadImage(dataURL);
   const W   = img.naturalWidth  || img.width;
@@ -134,26 +134,25 @@ async function cropHud(dataURL){
   const portrait = H >= W;
 
   // ---- analysis size ----
-  const SCAN_TARGET_W = 640;                     // a bit larger = cleaner edges
-  const scale = Math.min(1, SCAN_TARGET_W / W);
+  const SCAN_W = 640;
+  const scale  = Math.min(1, SCAN_W / W);
   const aW = Math.round(W * scale);
   const aH = Math.round(H * scale);
 
   const a = document.createElement('canvas');
   a.width = aW; a.height = aH;
-  const ctx = a.getContext('2d', { willReadFrequently: true });
-  ctx.drawImage(img, 0, 0, aW, aH);
-  const px = ctx.getImageData(0, 0, aW, aH).data;
+  const g = a.getContext('2d', { willReadFrequently: true });
+  g.drawImage(img, 0, 0, aW, aH);
+  const px = g.getImageData(0, 0, aW, aH).data;
 
-  // ---- row blackness over bottom 65% (GPS HUD sits low) ----
-  const startRow = Math.floor(aH * 0.35);
+  // ---- compute "blackness" per row over bottom 70% ----
+  const startRow = Math.floor(aH * 0.30);
   const rows = aH - startRow;
+  const DARK_Y = 110;
 
   const blackFrac = new Float32Array(rows);
-  const DARK_Y = 110;                             // luminance threshold for "black"
   for (let y = startRow; y < aH; y++){
-    let black = 0;
-    const off = y * aW * 4;
+    let black = 0, off = y * aW * 4;
     for (let x = 0; x < aW; x++){
       const i = off + x*4;
       const Y = 0.2126*px[i] + 0.7152*px[i+1] + 0.0722*px[i+2];
@@ -161,108 +160,117 @@ async function cropHud(dataURL){
     }
     blackFrac[y - startRow] = black / aW;
   }
-
-  // Smooth a little (moving average)
-  const win = 5;
+  // smooth (window=5)
   const sm = new Float32Array(rows);
-  let acc = 0;
-  for (let i = 0; i < rows; i++){
-    acc += blackFrac[i];
-    if (i >= win) acc -= blackFrac[i - win];
-    sm[i] = acc / Math.min(i+1, win);
+  let acc=0; const WIN=5;
+  for (let i=0;i<rows;i++){ acc+=blackFrac[i]; if(i>=WIN) acc-=blackFrac[i-WIN]; sm[i]=acc/Math.min(i+1,WIN); }
+
+  // ---- find dark band [top..bottom] using hysteresis ----
+  const HI = 0.72, LO = 0.50;
+  const minBand = Math.round((portrait ? 0.12 : 0.10) * aH);
+
+  const segs=[];
+  let i=0;
+  while (i<rows){
+    while (i<rows && sm[i] < HI) i++;
+    if (i>=rows) break;
+    const s=i;
+    while (i<rows && sm[i] >= LO) i++;
+    const e=i-1;
+    if ((startRow+e) > aH*0.60) segs.push({s,e});
+  }
+  segs.sort((A,B)=> (B.e-A.e) || ((B.e-B.s)-(A.e-A.s)));
+  let best = segs[0];
+
+  if (!best){
+    const topP = portrait ? 0.78 : 0.80;
+    const botP = portrait ? 0.93 : 0.92;
+    best = { s: Math.round(aH*topP)-startRow, e: Math.round(aH*botP)-startRow };
+  }
+  if ((best.e - best.s + 1) < minBand){
+    best.s = Math.max(0, best.e - minBand);
   }
 
-  // ---- find HUD band [top..bottom] using hysteresis ----
-  const HI = 0.70, LO = 0.45;                    // robust to speckles
-  let bandBot = rows - 1;
-  // walk up from bottom to the first sufficiently dark region
-  while (bandBot >= 0 && sm[bandBot] < LO) bandBot--;
-  // if nothing dark found, fallback to percent zone
-  if (bandBot < 0){
-    const t = Math.round(aH * (portrait ? 0.78 : 0.80));
-    const b = Math.min(aH - 1, Math.round(aH * (portrait ? 0.95 : 0.92)));
-    return cropFromAnalysis(img, W, H, scale, {leftFrac: portrait ? 0.22 : 0.18, top: t, bottom: b});
+  // convert to original coords
+  const bandTopY = Math.round((startRow + best.s) / scale);
+  const bandBotY = Math.round((startRow + best.e) / scale);
+
+  // Pads
+  const TOP_PAD        = Math.round(H * 0.003);
+  const BOTTOM_SHRINK  = Math.round(H * 0.012);
+
+  const top    = Math.max(0, bandTopY - TOP_PAD);
+  const bottom = Math.max(top+6, Math.min(H, bandBotY - BOTTOM_SHRINK));
+
+  // ---- left trim: detect mini-map or keep small margin ----
+  const scanTop = Math.max(Math.round((startRow + best.s) * 1.0), 0);
+  const scanBot = Math.min(Math.round((startRow + best.e) * 1.0), aH-1);
+  const scanCols = Math.round(aW * 0.45);   // cap to 45% so we never cut into text
+
+  // Stats for left 18% of band (map area if present)
+  const x0 = 0, x1 = Math.max(1, Math.round(aW * 0.18));
+  let n=0, sum=0, sumsq=0;
+  for (let y=scanTop; y<=scanBot; y++){
+    for (let x=x0; x<x1; x++){
+      const k = (y*aW + x)*4;
+      const Y = 0.2126*px[k] + 0.7152*px[k+1] + 0.0722*px[k+2];
+      sum += Y; sumsq += Y*Y; n++;
+    }
   }
-  // extend upward while we remain in dark zone with hysteresis
-  let bandTop = bandBot;
-  while (bandTop >= 0 && sm[bandTop] >= HI) bandTop--;
-  bandTop++; // first row inside the band
+  const mean = sum / Math.max(1, n);
+  const variance = Math.max(0, sumsq/Math.max(1,n) - mean*mean);
+  const stdDev = Math.sqrt(variance);
 
-  // sanity: ensure a minimum HUD height
-  const minBandPx = Math.round((portrait ? 0.12 : 0.10) * aH);
-  if ((bandBot - bandTop + 1) < minBandPx){
-    bandTop = Math.max(0, bandBot - minBandPx);
-  }
+  // Heuristic: mini-map exists if left band is not very dark AND highly textured
+  const hasMiniMap = (mean > 35) && (stdDev > 22);
 
-  // ---- find left mini-map edge inside the band ----
-  const scanTop = Math.max(startRow + bandTop + 8, startRow);
-  const scanBot = Math.min(startRow + bandBot - 8, aH - 1);
-  const scanCols = Math.round(aW * 0.55);        // left half is enough
-
-  // column mean luminance in the band → vertical edge score
+  // vertical edge strength (inside left 45% only)
   const colMean = (x) => {
     let s = 0;
     for (let y = scanTop; y <= scanBot; y++){
-      const i = (y * aW + x) * 4;
-      s += 0.2126*px[i] + 0.7152*px[i+1] + 0.0722*px[i+2];
+      const idx = (y * aW + x) * 4;
+      s += 0.2126*px[idx] + 0.7152*px[idx+1] + 0.0722*px[idx+2];
     }
     return s / (scanBot - scanTop + 1);
   };
   let prev = colMean(0);
-  const edge = new Float32Array(scanCols - 1);
-  for (let x = 1; x < scanCols; x++){
-    const cur = colMean(x);
-    edge[x-1] = Math.abs(cur - prev);
-    prev = cur;
+  const edge = new Float32Array(Math.max(1, scanCols-1));
+  for (let x=1; x<scanCols; x++){ const cur=colMean(x); edge[x-1]=Math.abs(cur-prev); prev=cur; }
+  for (let k=2; k<edge.length-2; k++){ edge[k]=(edge[k-2]+edge[k-1]+edge[k]+edge[k+1]+edge[k+2])/5; }
+
+  // robust threshold using median
+  const sorted = Array.from(edge).sort((a,b)=>a-b);
+  const med = sorted[Math.floor(sorted.length*0.5)] || 0;
+  let maxVal=-1, maxIdx=-1;
+  for (let x=Math.floor(edge.length*0.01); x<edge.length; x++){
+    if (edge[x] > maxVal){ maxVal=edge[x]; maxIdx=x; }
   }
-  // smooth edge
-  for (let i = 2; i < edge.length - 2; i++){
-    edge[i] = (edge[i-2] + edge[i-1] + edge[i] + edge[i+1] + edge[i+2]) / 5;
-  }
+  const strongEdge = maxVal > (med * 2.2);
 
-  // strongest edge but avoid very left 1% noise
-  let maxVal = -1, maxIdx = -1;
-  const leftSkip = Math.floor(edge.length * 0.01);
-  for (let i = leftSkip; i < edge.length; i++){
-    if (edge[i] > maxVal){ maxVal = edge[i]; maxIdx = i; }
-  }
+  // baseline small margin when no map / weak edge
+  const NO_MAP_LEFT_FRAC = 0.04;                // keep small margin
+  let leftFrac = NO_MAP_LEFT_FRAC;
 
-  // convert analysis → original
-  const bandTopY = Math.max(0, Math.round((startRow + bandTop) / scale));
-  const bandBotY = Math.min(H - 1, Math.round((startRow + bandBot) / scale));
-
-  // tiny cushions
-  const TOP_PAD  = Math.round(H * 0.003);
-  const BOT_PAD  = Math.round(H * 0.004);
-
-  const top  = Math.max(0, bandTopY - TOP_PAD);
-  const bottom = Math.min(H, bandBotY + BOT_PAD);
-
-  // left cut from edge (or fallback)
-  let leftFrac = portrait ? 0.22 : 0.18;         // fallback
-  if (maxIdx > 10){                               // good edge found
-    const xEdgeAnalytic = maxIdx + 8;            // margin inside black band
-    leftFrac = Math.max(leftFrac, (xEdgeAnalytic / aW));
+  if (hasMiniMap && strongEdge && maxIdx > 8){
+    // Map detected → cut at edge (with small margin), but never beyond 28%
+    const edgeFrac = (maxIdx + 8) / aW;
+    leftFrac = Math.min(0.28, Math.max(0.12, edgeFrac));
   }
 
-  return cropFromAnalysis(img, W, H, scale, { leftFrac, top, bottom });
-}
-
-// helper used by cropHud
-function cropFromAnalysis(img, W, H, scale, { leftFrac, top, bottom }){
   const RIGHT_PAD_FRAC = 0.02;
   const leftCut = Math.max(0, Math.round(W * leftFrac));
   const rightPad = Math.round(W * RIGHT_PAD_FRAC);
+
   const sx = leftCut;
-  const sy = Math.max(0, Math.min(H-1, top));
+  const sy = top;
   const sw = Math.max(1, W - leftCut - rightPad);
-  const sh = Math.max(1, Math.min(H - sy, bottom - top));
+  const sh = Math.max(1, bottom - top);
 
   const c = document.createElement('canvas');
   c.width = sw; c.height = sh;
   c.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
 
-  logToConsole('', { W, H, sx, sy, sw, sh, leftFrac: +leftFrac.toFixed(3) }, '[Smart HUD crop v2]');
+  logToConsole('', {W,H,sx,sy,sw,sh,leftFrac:+leftFrac.toFixed(3), hasMiniMap, stdDev:+stdDev.toFixed(1), mean:+mean.toFixed(1)}, '[Smart HUD crop v4]');
   return c.toDataURL('image/png');
 }
 
