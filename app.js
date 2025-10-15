@@ -148,14 +148,14 @@ async function cropHudStatic(dataURL){
   return c.toDataURL('image/png');
 }
 
-/* Smart HUD finder v2 — anchor to the black footer strip */
+/* Smart HUD finder v3 — footer anchor + top-edge detection */
 async function cropHudSmart(dataURL){
   const img = await loadImage(dataURL);
   const W = img.naturalWidth, H = img.naturalHeight;
   const isPortrait = H >= W;
 
-  // --- 1) Read only the bottom 25% to find the dark footer bar ---
-  const scanStartFrac = 0.75;                 // start scanning from 75% height
+  // ===== 1) Scan the bottom quarter to locate the solid black footer =====
+  const scanStartFrac = 0.72;                    // start scanning from 72% height
   const fromY = Math.floor(H * scanStartFrac);
   const ch = H - fromY;
 
@@ -164,58 +164,86 @@ async function cropHudSmart(dataURL){
   const ctx = c.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(img, 0, -fromY);
 
-  // Row luminance (mean of grayscale). Find longest contiguous "very dark" run near bottom.
+  // Row luminance (mean of grayscale)
   const means = new Float32Array(ch);
-  for (let y = 0; y < ch; y += 1) {
+  for (let y = 0; y < ch; y++) {
     const row = ctx.getImageData(0, y, W, 1).data;
     let s = 0;
     for (let i = 0; i < row.length; i += 4) s += (row[i] + row[i+1] + row[i+2]) / 3;
     means[y] = s / (row.length / 4);
   }
 
-  // Footer is the darkest horizontal band close to the bottom; threshold adaptively.
-  const global = means.reduce((a,b)=>a+b,0) / ch;
-  const T = Math.min(80, global - 40);        // very dark rows (footer is near-black)
+  // Adaptive threshold to find "very dark" rows (footer)
+  let gSum = 0; for (let i = 0; i < ch; i++) gSum += means[i];
+  const gMean = gSum / Math.max(1, ch);
+  const Tdark = Math.min(85, gMean - 45);        // footer is near-black
 
-  // Find deepest (lowest) contiguous block of rows < T with thickness >= 6px
+  // Longest contiguous dark block near the bottom
   let bestTop = -1, bestLen = 0, curTop = -1, curLen = 0;
   for (let y = 0; y < ch; y++){
-    if (means[y] < T){
+    if (means[y] < Tdark){
       if (curTop < 0) curTop = y;
       curLen++;
     } else if (curLen){
-      if (curLen >= 6 && y > ch * 0.75 && (curLen > bestLen || (curLen === bestLen && y > bestTop))) {
+      if (curLen >= 6 && (curTop + curLen) > ch * 0.70 && curLen >= bestLen){
         bestTop = curTop; bestLen = curLen;
       }
       curTop = -1; curLen = 0;
     }
   }
-  if (curLen && curLen >= 6 && (curTop + curLen) > ch * 0.75){
+  if (curLen && curLen >= 6 && (curTop + curLen) > ch * 0.70 && curLen >= bestLen){
     bestTop = curTop; bestLen = curLen;
   }
   if (bestTop < 0) throw new Error('Footer not found');
 
-  // --- 2) Define HUD crop just above the footer ---
-  const footerTopY = fromY + bestTop;         // absolute Y where the black bar begins
-  const hudHeightFrac = isPortrait ? 0.26 : 0.22;
-  const hudHeight = Math.floor(H * hudHeightFrac);
+  const footerTopY = fromY + bestTop;            // absolute Y where footer begins
 
-  // Start Y: a fixed band above the footer, but not above 64% (keeps HUD in view)
-  let sy = Math.max(Math.floor(H * 0.64), footerTopY - hudHeight);
-  let sh = Math.min(hudHeight, H - sy);
+  // ===== 2) Find the HUD top edge by detecting the strong down-jump in brightness =====
+  // Compute vertical derivative (downward differences) above the footer
+  const deriv = new Float32Array(ch);
+  for (let y = 1; y < ch; y++) deriv[y] = means[y] - means[y-1];
 
-  // --- 3) Left/right trim to skip the mini-map ---
+  // Search upwards from the footer for a big negative slope (bright → dark)
+  const searchStart = Math.max(0, bestTop - Math.floor(H * 0.18)); // ~18% of H window above footer
+  let localMin = {y: bestTop, v: 0};
+  for (let y = bestTop; y >= searchStart; y--){
+    if (deriv[y] < localMin.v) localMin = {y, v: deriv[y]};
+  }
+
+  // Candidate HUD top is a bit above the strongest dark transition
+  const TOP_EDGE_BOOST = Math.floor(H * 0.01);   // 1% padding above detected edge
+  let hudTopY = fromY + Math.max(0, localMin.y - TOP_EDGE_BOOST);
+
+  // Safety clamp so we never start too high
+  const MIN_TOP_FRAC = 0.60;                     // let it rise if needed on tall frames
+  if (hudTopY < Math.floor(H * MIN_TOP_FRAC)) hudTopY = Math.floor(H * MIN_TOP_FRAC);
+
+  // ===== 3) Build the crop band just above the footer =====
+  const FOOTER_GAP = Math.floor(H * 0.006);      // keep a small clear gap above footer
+  const hudBottomY = Math.max(footerTopY - FOOTER_GAP, hudTopY + 1);
+
+  // Target HUD height — slightly taller on landscape
+  const HUD_FRAC = isPortrait ? 0.26 : 0.24;     // was 0.22 on landscape
+  let sh = Math.floor(H * HUD_FRAC);
+
+  // Don’t run into the footer
+  sh = Math.min(sh, Math.max(8, hudBottomY - hudTopY));
+
+  // Final Y
+  let sy = hudTopY;
+
+  // ===== 4) Left/right trim (skip the minimap & right padding) =====
   const mapCut = isPortrait ? 0.20 : 0.18;
-  const padL = isPortrait ? 0.028 : 0.022;
-  const padR = isPortrait ? 0.024 : 0.020;
+  const padL   = isPortrait ? 0.028 : 0.022;
+  const padR   = isPortrait ? 0.026 : 0.022;     // a touch more on the right
   const LEFT_RELAX = 0.030;
 
   let sx = Math.floor(W * (mapCut + padL - LEFT_RELAX));
   let sw = W - sx - Math.floor(W * padR);
 
-  // Clamp and draw
-  sx = Math.max(0, Math.min(sx, W-1));
-  sy = Math.max(0, Math.min(sy, H-1));
+  // ===== 5) Clamp & draw =====
+  sx = Math.max(0, Math.min(sx, W - 1));
+  sy = Math.max(0, Math.min(sy, H - 1));
   sw = Math.max(1, Math.min(sw, W - sx));
   sh = Math.max(1, Math.min(sh, H - sy));
 
@@ -224,7 +252,6 @@ async function cropHudSmart(dataURL){
   out.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
   return out.toDataURL('image/png');
 }
-
 
 /* Unified crop that tries smart first, then falls back to static (old behaviour) */
 async function cropHud(dataURL){
