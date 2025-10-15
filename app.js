@@ -96,11 +96,11 @@ const ENTRY={date:'entry.1911996449',time:'entry.1421115881',lat:'entry.41928899
 /* ===== HUD CROP TUNABLES ===== */
 const HUDCFG = {
   scanStartFrac: 0.72,     // start scanning for footer from 72% height
-  minTopFrac:    0.58,     // crop won't start above 60% of height
-  footerGapFrac: 0.008,    // keep 1.0% gap above footer
+  minTopFrac:    0.56,     // crop won't start above 60% of height
+  footerGapFrac: 0.006,    // keep 1.0% gap above footer
 
-  hudFracPortrait:  0.29,  // target HUD band height (portrait)
-  hudFracLandscape: 0.27,  // target HUD band height (landscape)
+  hudFracPortrait:  0.31,  // target HUD band height (portrait)
+  hudFracLandscape: 0.29,  // target HUD band height (landscape)
 
   mapCutPortrait:   0.185,  // skip minimap area on the left
   mapCutLandscape:  0.158,
@@ -213,7 +213,7 @@ async function cropHudSmart(dataURL){
   for (let y = bestTop; y >= searchStart; y--){
     if (deriv[y] < localMin.v) localMin = {y, v: deriv[y]};
   }
-  const TOP_EDGE_BOOST = Math.floor(H * 0.01);
+  const TOP_EDGE_BOOST = Math.floor(H * 0.015);   // move top ~1.5% higher → taller band
   let hudTopY = fromY + Math.max(0, localMin.y - TOP_EDGE_BOOST);
 
   // Safety: don’t go above minTopFrac
@@ -225,7 +225,9 @@ async function cropHudSmart(dataURL){
 
   const HUD_FRAC = isPortrait ? HUDCFG.hudFracPortrait : HUDCFG.hudFracLandscape;
   let sh = Math.floor(H * HUD_FRAC);
-  sh = Math.min(sh, Math.max(8, hudBottomY - hudTopY));
+   // keep at least 1% extra height if available, but never cross the footer gap
+   const MIN_EXTRA = Math.floor(H * 0.01);
+   sh = Math.min(sh, Math.max(8, (hudBottomY - hudTopY) + MIN_EXTRA));
 
   let sy = hudTopY;
 
@@ -260,8 +262,8 @@ async function preprocessForOCR(cropDataURL){
   const src=await loadImage(cropDataURL);
   const w=src.naturalWidth, h=src.naturalHeight;
 
-  const cutTop    = Math.floor(h*0.13); // keep more top text
-  const cutBottom = Math.floor(h*0.02);
+  const cutTop    = Math.floor(h*0.12); // keep more top text
+  const cutBottom = Math.floor(h*0.01);
   const h2=h - cutTop - cutBottom;
 
   const c=document.createElement('canvas');
