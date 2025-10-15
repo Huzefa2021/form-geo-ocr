@@ -77,10 +77,11 @@
           <figure class="preview-col">
             <figcaption>Cropped HUD Preview</figcaption>
             <img id="imgCrop" class="preview-img" alt="Cropped HUD Preview" />
-             <!-- Put this just under the Cropped HUD Preview image/figure -->
-               <button id="openManual" type="button" class="toolbtn" style="display:none">
-                  Adjust crop…
-                </button>
+             <!-- Under the Cropped HUD Preview <img id="imgCrop"> -->
+              <button id="openManual" type="button" class="toolbtn" style="display:none">
+              CLICK HERE TO ADJUST HUD CROP...
+              </button>
+
           </figure>
         </div>
       </section>
@@ -143,6 +144,38 @@
     <p class="mc-hint">Tip: drag to move, use handles to resize, or use arrow keys (Shift = ×10px).</p>
   </div>
 </dialog>
+    <!-- Manual Crop Modal -->
+<dialog id="manualDialog" class="mc-modal" aria-labelledby="mcTitle">
+  <div class="mc">
+    <div class="mc-head">
+      <strong id="mcTitle">Adjust crop</strong>
+      <div class="mc-actions">
+        <button id="mcCancel" type="button" class="toolbtn">Cancel</button>
+        <button id="mcReset"  type="button" class="toolbtn">Reset</button>
+        <button id="mcApply"  type="button" class="toolbtn primary">Use selection</button>
+      </div>
+    </div>
+
+    <div id="mcStage" class="mc-stage">
+      <!-- wrapper sized to the rendered image; crop box sits on top -->
+      <div id="mcCanvas" class="mc-canvas">
+        <img id="mcImg" alt="Preview for manual crop"/>
+        <div id="mcBox" class="mc-box" role="region" aria-label="Crop area" tabindex="0">
+          <span class="mc-h mc-h-nw" data-dir="nw"></span>
+          <span class="mc-h mc-h-n"  data-dir="n"></span>
+          <span class="mc-h mc-h-ne" data-dir="ne"></span>
+          <span class="mc-h mc-h-e"  data-dir="e"></span>
+          <span class="mc-h mc-h-se" data-dir="se"></span>
+          <span class="mc-h mc-h-s"  data-dir="s"></span>
+          <span class="mc-h mc-h-sw" data-dir="sw"></span>
+          <span class="mc-h mc-h-w"  data-dir="w"></span>
+        </div>
+      </div>
+    </div>
+
+    <p class="mc-hint">Drag to move, use handles to resize, or arrow keys (Shift = ×10px).</p>
+  </div>
+</dialog>
   </main>
 
   <!-- Sticky Footer -->
@@ -151,7 +184,6 @@
     <div>© 2025 <strong>Municipal Corporation of Greater Mumbai (MCGM)</strong></div>
     <div>Developed by <strong>Crescendo Innovative Solutions LLP</strong></div>
     <div>Admin: <strong>Huzefa Kathawala</strong> · <a href="mailto:huzefa.k@crescendoits.com">huzefa.k@crescendoits.com</a></div>
-    <div><span id="buildId">Build: v2025.09.25.M1</span></div>
   </div>
 </footer>
 </body>
