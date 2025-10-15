@@ -77,10 +77,10 @@
           <figure class="preview-col">
             <figcaption>Cropped HUD Preview</figcaption>
             <img id="imgCrop" class="preview-img" alt="Cropped HUD Preview" />
-                      <!-- Put this just under the Cropped HUD Preview image/figure -->
-            <button id="openManual" type="button" class="ghost" style="display:none;margin-top:8px;">
-  Adjust crop…
-</button>
+             <!-- Put this just under the Cropped HUD Preview image/figure -->
+               <button id="openManual" type="button" class="toolbtn" style="display:none">
+                  Adjust crop…
+                </button>
           </figure>
         </div>
       </section>
@@ -113,32 +113,36 @@
       </section>
     </div>
     <!-- Manual Crop Editor -->
-<section id="manualEditor" class="mc hidden" aria-hidden="true">
-  <div class="mc-head">
-    <strong>Adjust crop</strong>
-    <div class="mc-actions">
-      <button id="mcCancel" type="button">Cancel</button>
-      <button id="mcReset"  type="button">Reset</button>
-      <button id="mcApply"  type="button" class="primary">Use selection</button>
+<dialog id="manualDialog" class="mc-modal" aria-labelledby="mcTitle">
+  <div class="mc">
+    <div class="mc-head">
+      <strong id="mcTitle">Adjust crop</strong>
+      <div class="mc-actions">
+        <button id="mcCancel" type="button">Cancel</button>
+        <button id="mcReset"  type="button">Reset</button>
+        <button id="mcApply"  type="button" class="primary">Use selection</button>
+      </div>
     </div>
-  </div>
 
-  <div id="mcStage" class="mc-stage">
-    <img id="mcImg" alt="Preview for manual crop"/>
-    <div id="mcBox" class="mc-box" role="region" aria-label="Crop area" tabindex="0">
-      <span class="mc-h mc-h-nw" data-dir="nw"></span>
-      <span class="mc-h mc-h-n"  data-dir="n"></span>
-      <span class="mc-h mc-h-ne" data-dir="ne"></span>
-      <span class="mc-h mc-h-e"  data-dir="e"></span>
-      <span class="mc-h mc-h-se" data-dir="se"></span>
-      <span class="mc-h mc-h-s"  data-dir="s"></span>
-      <span class="mc-h mc-h-sw" data-dir="sw"></span>
-      <span class="mc-h mc-h-w"  data-dir="w"></span>
+    <div id="mcStage" class="mc-stage">
+      <!-- wrapper sized to the rendered image; box sits on top -->
+      <div id="mcCanvas" class="mc-canvas">
+        <img id="mcImg" alt="Preview for manual crop"/>
+        <div id="mcBox" class="mc-box" role="region" aria-label="Crop area" tabindex="0">
+          <span class="mc-h mc-h-nw" data-dir="nw"></span>
+          <span class="mc-h mc-h-n"  data-dir="n"></span>
+          <span class="mc-h mc-h-ne" data-dir="ne"></span>
+          <span class="mc-h mc-h-e"  data-dir="e"></span>
+          <span class="mc-h mc-h-se" data-dir="se"></span>
+          <span class="mc-h mc-h-s"  data-dir="s"></span>
+          <span class="mc-h mc-h-sw" data-dir="sw"></span>
+          <span class="mc-h mc-h-w"  data-dir="w"></span>
+        </div>
+      </div>
     </div>
+    <p class="mc-hint">Tip: drag to move, use handles to resize, or use arrow keys (Shift = ×10px).</p>
   </div>
-
-  <p class="mc-hint">Tip: drag to move, use handles to resize, or use arrow keys (Shift = ×10px).</p>
-</section>
+</dialog>
   </main>
 
   <!-- Sticky Footer -->
