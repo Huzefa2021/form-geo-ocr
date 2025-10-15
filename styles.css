@@ -249,4 +249,51 @@ body{
   border-color:#cbd5e1;
 }
 .toolbtn:active{ transform:translateY(1px); }
+/* === Console-style tool buttons (Copy / Hide / Adjust) === */
+.toolbtn{
+  display:inline-flex; align-items:center; gap:6px;
+  padding:6px 10px; border:1px solid var(--line, #d1d5db);
+  background:var(--panel, #ffffff); color:var(--text, #111827);
+  border-radius:8px; font:inherit; font-weight:500; line-height:1;
+  cursor:pointer; transition:background .15s, border-color .15s, color .15s;
+}
+.toolbtn:hover{ background:var(--panelHover, #f9fafb); border-color:#cbd5e1; }
+.toolbtn:active{ transform:translateY(1px); }
+.toolbtn.primary{ background:#4f46e5; color:#fff; border-color:#4f46e5; }
+.toolbtn.primary:hover{ filter:brightness(1.05); }
+
+/* === Modal dialog === */
+.mc-modal{ padding:0; border:0; background:transparent; width:min(96vw, 1200px); }
+.mc-modal::backdrop{ background:rgba(2,6,23,.6); backdrop-filter:blur(2px); }
+
+/* Card inside the dialog */
+.mc{ background:#0b0b0c; color:#fff; border-radius:12px; padding:10px;
+     box-shadow:0 10px 30px rgba(0,0,0,.35); }
+.mc-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+.mc-actions .toolbtn{ margin-left:8px; }
+
+/* Stage with scroll if needed */
+.mc-stage{ position:relative; max-height:70vh; overflow:auto; background:#111; border-radius:8px; padding:12px; }
+
+/* Wrapper is exactly the rendered image size; crop box sits on top */
+.mc-canvas{ position:relative; display:inline-block; }
+#mcImg{ display:block; width:100%; height:auto; max-width:none; user-select:none; -webkit-user-drag:none; }
+
+/* Crop box + handles */
+.mc-box{ position:absolute; border:2px dashed #22d3ee;
+         outline:9999px solid rgba(2,6,23,0.6);
+         box-shadow:0 0 0 1px rgba(34,211,238,0.4) inset; cursor:move; }
+.mc-h{ position:absolute; width:12px; height:12px; background:#22d3ee;
+       border:2px solid #0b0b0c; border-radius:50%; }
+.mc-h-nw{ left:-7px; top:-7px; cursor:nwse-resize; }
+.mc-h-n{ left:calc(50% - 6px); top:-7px; cursor:ns-resize; }
+.mc-h-ne{ right:-7px; top:-7px; cursor:nesw-resize; }
+.mc-h-e{ right:-7px; top:calc(50% - 6px); cursor:ew-resize; }
+.mc-h-se{ right:-7px; bottom:-7px; cursor:nwse-resize; }
+.mc-h-s{ left:calc(50% - 6px); bottom:-7px; cursor:ns-resize; }
+.mc-h-sw{ left:-7px; bottom:-7px; cursor:nesw-resize; }
+.mc-h-w{ left:-7px; top:calc(50% - 6px); cursor:ew-resize; }
+
+.mc-hint{ color:#a3a3a3; font-size:12px; margin-top:8px; }
+
 
