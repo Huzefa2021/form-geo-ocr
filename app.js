@@ -1,9 +1,10 @@
 /* ==========================================================
    Abandoned Vehicles — Marshal Upload (MCGM)
-   Build: v2025.10.15.MODAL
+   Build: v2025.10.16.MODAL+SAFE
    - Smart HUD v3 (footer anchor) + static fallback
    - Tunables via HUDCFG
    - Manual crop editor as a <dialog> modal (drag/resize)
+   - Default rect + guards so Adjust always opens
    ========================================================== */
 
 const $ = (id) => document.getElementById(id);
@@ -117,6 +118,30 @@ const STATIC_CROP={
   landscape:{ top:0.775,height:0.190,mapCut:0.185,pad:{top:0.016,bottom:0.014,left:0.022,right:0.020} }
 };
 
+/* ---------- Default Rect (safety) ---------- */
+function defaultHudRect(W, H){
+  const isPortrait = H >= W;
+  const frac = isPortrait ? HUDCFG.hudFracPortrait : HUDCFG.hudFracLandscape;
+
+  const mapCut = isPortrait ? HUDCFG.mapCutPortrait : HUDCFG.mapCutLandscape;
+  const padL   = isPortrait ? HUDCFG.padLPortrait   : HUDCFG.padLLandscape;
+  const padR   = isPortrait ? HUDCFG.padRPortrait   : HUDCFG.padRLandScape;
+
+  // Left start
+  let sx = Math.floor(W * (mapCut + padL - HUDCFG.leftRelax));
+  sx = Math.max(0, Math.min(sx, W - 1));
+
+  // Height & Y (a band near bottom, ~2% gap)
+  const sh = Math.max(8, Math.floor(H * frac));
+  const sy = Math.max(0, Math.min(H - sh - Math.floor(H * 0.02), H - 1));
+
+  // Width with right padding
+  let sw = W - sx - Math.floor(W * padR);
+  sw = Math.max(1, Math.min(sw, W - sx));
+
+  return { x: sx, y: sy, w: sw, h: Math.min(sh, H - sy) };
+}
+
 /* Downscale huge images for consistent OCR performance */
 async function resampleImage(dataURL, maxSide = 1600){
   const img = await loadImage(dataURL);
@@ -133,7 +158,7 @@ async function resampleImage(dataURL, maxSide = 1600){
   return c.toDataURL('image/jpeg', 0.92);
 }
 
-/* Old static crop */
+/* Old static crop (records autoRect) */
 async function cropHudStatic(dataURL){
   const img=await loadImage(dataURL);
   const W=img.naturalWidth, H=img.naturalHeight;
@@ -151,6 +176,10 @@ async function cropHudStatic(dataURL){
   if (sy<0) sy=0;
   if (sx+sw>W) sw=W-sx;
   if (sy+sh>H) sh=H-sy;
+
+  // Record rect so manual editor can open
+  mc.imgW = W; mc.imgH = H;
+  mc.autoRect = { x: sx, y: sy, w: sw, h: sh };
 
   const c=document.createElement('canvas');
   c.width=sw; c.height=sh;
@@ -243,7 +272,7 @@ async function cropHudSmart(dataURL){
   sw = Math.max(1, Math.min(sw, W - sx));
   sh = Math.max(1, Math.min(sh, H - sy));
 
-  // Save rect for Manual Editor (natural px)
+  // Record rect so the manual editor can open
   mc.imgW = W; mc.imgH = H; mc.autoRect = { x: sx, y: sy, w: sw, h: sh };
 
   const out = document.createElement('canvas');
@@ -393,11 +422,19 @@ async function handleFile(file){
     cropURL = await cropHud(dataURL);             // smart → fallback to static
     processed = await preprocessForOCR(cropURL);
     imgCrop && (imgCrop.src = processed);
-    const btn = document.getElementById('openManual');
-    if (btn) btn.style.display = 'inline-flex';
   }catch(e){
     setPill('ocr','err'); banner('Crop/Preprocess failed.','error'); logToConsole('',{error:String(e)},'[Preprocess error]'); return;
   }
+
+  // Ensure we have a rect for manual editor; synthesize if somehow missing
+  if (!mc.autoRect) {
+    const im = await loadImage(dataURL);
+    mc.imgW = im.naturalWidth; mc.imgH = im.naturalHeight;
+    mc.autoRect = defaultHudRect(mc.imgW, mc.imgH);
+  }
+  // Now it's safe to reveal the manual editor button
+  const btn = document.getElementById('openManual');
+  if (btn) btn.style.display = 'inline-flex';
 
   // OCR
   if(!(window.Tesseract && Tesseract.recognize)){
@@ -646,8 +683,17 @@ const mcApply   = document.getElementById('mcApply');
 const mcCancel  = document.getElementById('mcCancel');
 const mcReset   = document.getElementById('mcReset');
 
-function openManualEditor(){
-  if (!mc.imgURL || !mc.autoRect) { banner('No crop available to adjust yet.', 'error'); return; }
+async function openManualEditor(){
+  if (!mc.imgURL){
+    banner('No image loaded yet. Upload a photo first.', 'error');
+    return;
+  }
+  // self-heal: ensure we have a rect
+  if (!mc.autoRect){
+    const im = await loadImage(mc.imgURL);
+    mc.imgW = im.naturalWidth; mc.imgH = im.naturalHeight;
+    mc.autoRect = defaultHudRect(mc.imgW, mc.imgH);
+  }
 
   dialogEl.showModal();
 
@@ -682,7 +728,7 @@ function openManualEditor(){
 function closeManualEditor(){
   mc.enabled = false;
   detachMcEvents();
-  dialogEl.close();
+  if (dialogEl?.open) dialogEl.close();
 }
 
 function drawMcBox(){
@@ -705,7 +751,7 @@ function clampRect(r){
 }
 
 async function applyManualSelection(){
-  // 1) Render the selected rect to a canvas and get a data URL
+  // Render the selected rect to a canvas and get a data URL
   const c = document.createElement('canvas');
   c.width = mc.rect.w; c.height = mc.rect.h;
   const ctx = c.getContext('2d');
@@ -715,12 +761,12 @@ async function applyManualSelection(){
     ctx.drawImage(img, mc.rect.x, mc.rect.y, mc.rect.w, mc.rect.h, 0, 0, mc.rect.w, mc.rect.h);
     const manualCropURL = c.toDataURL('image/png');
 
-    // 2) Close the modal *right away* so the UI responds instantly
+    // Close the modal immediately for snappy UX
     try { if (dialogEl?.open) dialogEl.close(); } catch {}
-    detachMcEvents();     // clean up listeners
-    mc.enabled = false;   // mark as closed
+    detachMcEvents();
+    mc.enabled = false;
 
-    // 3) Continue the pipeline as before (preprocess → OCR → parse → geo → redirect)
+    // Continue the pipeline as before (preprocess → OCR → parse → geo → redirect)
     try{
       const processed = await preprocessForOCR(manualCropURL);
       imgCrop && (imgCrop.src = processed);
@@ -740,7 +786,7 @@ async function applyManualSelection(){
 
       if(!parsed.date || !parsed.time || isNaN(parsed.lat) || isNaN(parsed.lon) || !parsed.address){
         setPill('parse','err'); banner('Could not parse all fields from adjusted crop.', 'error'); return;
-        }
+      }
       setPill('parse','ok');
 
       outDate && (outDate.textContent = parsed.date);
@@ -789,7 +835,6 @@ async function applyManualSelection(){
 
   img.src = mc.imgURL;
 }
-
 
 /* Drag / Resize controls */
 let drag = null; // {mode, startX, startY, rect0}
