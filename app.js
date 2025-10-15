@@ -705,14 +705,22 @@ function clampRect(r){
 }
 
 async function applyManualSelection(){
+  // 1) Render the selected rect to a canvas and get a data URL
   const c = document.createElement('canvas');
   c.width = mc.rect.w; c.height = mc.rect.h;
   const ctx = c.getContext('2d');
   const img = new Image();
+
   img.onload = async () => {
     ctx.drawImage(img, mc.rect.x, mc.rect.y, mc.rect.w, mc.rect.h, 0, 0, mc.rect.w, mc.rect.h);
     const manualCropURL = c.toDataURL('image/png');
 
+    // 2) Close the modal *right away* so the UI responds instantly
+    try { if (dialogEl?.open) dialogEl.close(); } catch {}
+    detachMcEvents();     // clean up listeners
+    mc.enabled = false;   // mark as closed
+
+    // 3) Continue the pipeline as before (preprocess → OCR → parse → geo → redirect)
     try{
       const processed = await preprocessForOCR(manualCropURL);
       imgCrop && (imgCrop.src = processed);
@@ -732,7 +740,7 @@ async function applyManualSelection(){
 
       if(!parsed.date || !parsed.time || isNaN(parsed.lat) || isNaN(parsed.lon) || !parsed.address){
         setPill('parse','err'); banner('Could not parse all fields from adjusted crop.', 'error'); return;
-      }
+        }
       setPill('parse','ok');
 
       outDate && (outDate.textContent = parsed.date);
@@ -776,12 +784,12 @@ async function applyManualSelection(){
     }catch(e){
       banner('Manual crop failed.', 'error');
       console.error(e);
-    } finally {
-      closeManualEditor();
     }
   };
+
   img.src = mc.imgURL;
 }
+
 
 /* Drag / Resize controls */
 let drag = null; // {mode, startX, startY, rect0}
