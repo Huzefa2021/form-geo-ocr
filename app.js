@@ -1,9 +1,9 @@
 /* ==========================================================
    Abandoned Vehicles — Marshal Upload (MCGM)
-   Build: v2025.10.15.MANUAL
+   Build: v2025.10.15.MODAL
    - Smart HUD v3 (footer anchor) + static fallback
    - Tunables via HUDCFG
-   - Manual crop editor (draw/resize frame)
+   - Manual crop editor as a <dialog> modal (drag/resize)
    ========================================================== */
 
 const $ = (id) => document.getElementById(id);
@@ -625,19 +625,21 @@ function geoLookup(lat, lon){
   return out;
 }
 
-/* ---------- Manual Crop Editor (draw/resize) ---------- */
+/* ---------- Manual Crop Editor (modal) ---------- */
 let mc = {
   enabled: false,
   imgURL: '',
-  imgW: 0, imgH: 0,
-  viewW: 0, viewH: 0,
-  scaleX: 1, scaleY: 1,
-  rect: { x:0, y:0, w:100, h:100 },
+  imgW: 0, imgH: 0,          // natural image size
+  viewW: 0, viewH: 0,        // displayed image size in modal
+  scale: 1,                  // uniform scale
+  rect: { x:0, y:0, w:100, h:100 },   // in natural px
   autoRect: null
 };
-const openManualBtn = document.getElementById('openManual');
-const editorEl  = document.getElementById('manualEditor');
+
+const openManualBtn = document.getElementById('openManual'); // styled like console buttons (toolbtn)
+const dialogEl  = document.getElementById('manualDialog');
 const stageEl   = document.getElementById('mcStage');
+const canvasEl  = document.getElementById('mcCanvas'); // wrapper sized to rendered image
 const imgEl     = document.getElementById('mcImg');
 const boxEl     = document.getElementById('mcBox');
 const mcApply   = document.getElementById('mcApply');
@@ -646,38 +648,54 @@ const mcReset   = document.getElementById('mcReset');
 
 function openManualEditor(){
   if (!mc.imgURL || !mc.autoRect) { banner('No crop available to adjust yet.', 'error'); return; }
+
+  dialogEl.showModal();
+
   imgEl.onload = () => {
     const rW = imgEl.naturalWidth, rH = imgEl.naturalHeight;
-    const rect = imgEl.getBoundingClientRect();
-    const vw = rect.width || rW, vh = rect.height || rH;
-    mc.viewW = vw; mc.viewH = vh;
-    mc.scaleX = vw / rW; mc.scaleY = vh / rH;
-    mc.rect = { ...mc.autoRect };
-    drawMcBox();
+
+    const maxW = Math.min(stageEl.clientWidth - 24, 1600);
+    const maxH = Math.min(stageEl.clientHeight - 24, 900);
+
+    let scale = maxW / rW;
+    if (rH * scale > maxH) scale = maxH / rH;
+
+    const vw = Math.max(1, Math.round(rW * scale));
+    const vh = Math.max(1, Math.round(rH * scale));
+
+    canvasEl.style.width  = vw + 'px';
+    canvasEl.style.height = vh + 'px';
+    imgEl.style.width     = vw + 'px';
+    imgEl.style.height    = vh + 'px';
+
+    mc.imgW = rW; mc.imgH = rH; mc.viewW = vw; mc.viewH = vh; mc.scale = scale;
+
+    mc.rect = clampRect({ ...mc.autoRect });
+    requestAnimationFrame(drawMcBox);
   };
+
   imgEl.src = mc.imgURL;
-  editorEl.classList.remove('hidden');
-  editorEl.setAttribute('aria-hidden','false');
   mc.enabled = true;
   attachMcEvents();
 }
+
 function closeManualEditor(){
   mc.enabled = false;
   detachMcEvents();
-  editorEl.classList.add('hidden');
-  editorEl.setAttribute('aria-hidden','true');
+  dialogEl.close();
 }
-function resetManualRect(){ if (mc.autoRect) mc.rect = { ...mc.autoRect }; drawMcBox(); }
+
 function drawMcBox(){
-  const vx = mc.rect.x * mc.scaleX;
-  const vy = mc.rect.y * mc.scaleY;
-  const vw = mc.rect.w * mc.scaleX;
-  const vh = mc.rect.h * mc.scaleY;
+  const vx = mc.rect.x * mc.scale;
+  const vy = mc.rect.y * mc.scale;
+  const vw = mc.rect.w * mc.scale;
+  const vh = mc.rect.h * mc.scale;
   boxEl.style.left   = `${vx}px`;
   boxEl.style.top    = `${vy}px`;
   boxEl.style.width  = `${vw}px`;
   boxEl.style.height = `${vh}px`;
 }
+
 function clampRect(r){
   r.x = Math.max(0, Math.min(r.x, mc.imgW - 1));
   r.y = Math.max(0, Math.min(r.y, mc.imgH - 1));
@@ -685,6 +703,7 @@ function clampRect(r){
   r.h = Math.max(8, Math.min(r.h, mc.imgH - r.y));
   return r;
 }
+
 async function applyManualSelection(){
   const c = document.createElement('canvas');
   c.width = mc.rect.w; c.height = mc.rect.h;
@@ -765,43 +784,51 @@ async function applyManualSelection(){
 }
 
 /* Drag / Resize controls */
-let drag = null; // {mode:'move'|'n'|'ne'... , startX, startY, rect0}
+let drag = null; // {mode, startX, startY, rect0}
 function attachMcEvents(){
   boxEl.addEventListener('mousedown', onBoxMouseDown);
-  stageEl.addEventListener('mousedown', onHandleDown, true);
+  canvasEl.addEventListener('mousedown', onHandleDown, true);
   window.addEventListener('mousemove', onMouseMove);
   window.addEventListener('mouseup', onMouseUp);
   boxEl.addEventListener('keydown', onBoxKey);
   mcApply.addEventListener('click', applyManualSelection);
   mcCancel.addEventListener('click', closeManualEditor);
-  mcReset.addEventListener('click', resetManualRect);
+  mcReset.addEventListener('click', ()=>{ mc.rect = clampRect({ ...mc.autoRect }); drawMcBox(); });
 }
 function detachMcEvents(){
   boxEl.removeEventListener('mousedown', onBoxMouseDown);
-  stageEl.removeEventListener('mousedown', onHandleDown, true);
+  canvasEl.removeEventListener('mousedown', onHandleDown, true);
   window.removeEventListener('mousemove', onMouseMove);
   window.removeEventListener('mouseup', onMouseUp);
   boxEl.removeEventListener('keydown', onBoxKey);
   mcApply.removeEventListener('click', applyManualSelection);
   mcCancel.removeEventListener('click', closeManualEditor);
-  mcReset.removeEventListener('click', resetManualRect);
+  mcReset.removeEventListener('click', ()=>{});
+}
+function toCanvasCoords(evt){
+  const r = canvasEl.getBoundingClientRect();
+  return { x: (evt.clientX - r.left) / mc.scale, y: (evt.clientY - r.top) / mc.scale };
 }
 function onBoxMouseDown(e){
   if ((e.target).classList.contains('mc-h')) return;
   e.preventDefault();
-  drag = { mode:'move', startX:e.clientX, startY:e.clientY, rect0:{...mc.rect} };
+  const p = toCanvasCoords(e);
+  drag = { mode:'move', startX:p.x, startY:p.y, rect0:{...mc.rect} };
 }
 function onHandleDown(e){
   const t = e.target;
   if (!t.classList.contains('mc-h')) return;
   e.preventDefault();
-  drag = { mode:t.dataset.dir, startX:e.clientX, startY:e.clientY, rect0:{...mc.rect} };
+  const p = toCanvasCoords(e);
+  drag = { mode:t.dataset.dir, startX:p.x, startY:p.y, rect0:{...mc.rect} };
 }
 function onMouseMove(e){
   if (!drag) return;
-  const dx = (e.clientX - drag.startX) / mc.scaleX;
-  const dy = (e.clientY - drag.startY) / mc.scaleY;
+  const p = toCanvasCoords(e);
+  const dx = p.x - drag.startX;
+  const dy = p.y - drag.startY;
   let r = { ...drag.rect0 };
+
   if (drag.mode === 'move'){
     r.x += dx; r.y += dy;
   } else {
@@ -810,17 +837,19 @@ function onMouseMove(e){
     if (drag.mode.includes('e')) { r.w += dx; }
     if (drag.mode.includes('s')) { r.h += dy; }
   }
-  clampRect(r); mc.rect = r; drawMcBox();
+  mc.rect = clampRect(r);
+  drawMcBox();
 }
 function onMouseUp(){ drag = null; }
 function onBoxKey(e){
-  const step = e.shiftKey ? 10 : 1;
+  const step = (e.shiftKey ? 10 : 1);
   let r = { ...mc.rect };
   if (e.key === 'ArrowLeft')  r.x -= step;
   if (e.key === 'ArrowRight') r.x += step;
   if (e.key === 'ArrowUp')    r.y -= step;
   if (e.key === 'ArrowDown')  r.y += step;
-  clampRect(r); mc.rect = r; drawMcBox();
+  mc.rect = clampRect(r);
+  drawMcBox();
 }
 
 /* ---------- Console buttons & manual open ---------- */
