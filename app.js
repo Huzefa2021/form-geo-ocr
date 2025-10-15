@@ -261,7 +261,7 @@ async function preprocessForOCR(cropDataURL){
   const w=src.naturalWidth, h=src.naturalHeight;
 
   const cutTop    = Math.floor(h*0.13); // keep more top text
-  const cutBottom = Math.floor(h*0.04);
+  const cutBottom = Math.floor(h*0.02);
   const h2=h - cutTop - cutBottom;
 
   const c=document.createElement('canvas');
