@@ -1,9 +1,9 @@
 /* ==========================================================
    Abandoned Vehicles — Marshal Upload (MCGM)
-   Build: v2025.10.15.S3  (Smart HUD v3 + tunables + static fallback)
-   - Single GeoJSON for Beats that also contains Ward info
-   - Police jurisdiction GeoJSON kept separate
-   - Robust OCR + parsing + prefill normalization
+   Build: v2025.10.15.MANUAL
+   - Smart HUD v3 (footer anchor) + static fallback
+   - Tunables via HUDCFG
+   - Manual crop editor (draw/resize frame)
    ========================================================== */
 
 const $ = (id) => document.getElementById(id);
@@ -34,7 +34,7 @@ const pills = {
 
 let lastRedirectUrl = '';
 
-/* ---------- CDN badge ---------- */
+/* ---------- Badges ---------- */
 function updateCdnBadge(){
   const b = $('cdnBadge'); if(!b) return;
   const ok = !!(window.Tesseract && Tesseract.recognize);
@@ -96,19 +96,19 @@ const ENTRY={date:'entry.1911996449',time:'entry.1421115881',lat:'entry.41928899
 /* ===== HUD CROP TUNABLES ===== */
 const HUDCFG = {
   scanStartFrac: 0.72,     // start scanning for footer from 72% height
-  minTopFrac:    0.56,     // crop won't start above 60% of height
-  footerGapFrac: 0.006,    // keep 1.0% gap above footer
+  minTopFrac:    0.56,     // crop won't start above 56% → more room below
+  footerGapFrac: 0.006,    // keep at least 0.6% gap above footer
 
-  hudFracPortrait:  0.31,  // target HUD band height (portrait)
-  hudFracLandscape: 0.29,  // target HUD band height (landscape)
+  hudFracPortrait:  0.31,  // target HUD band height
+  hudFracLandscape: 0.29,
 
-  mapCutPortrait:   0.185,  // skip minimap area on the left
+  mapCutPortrait:   0.185, // left minimap trims
   mapCutLandscape:  0.158,
   padLPortrait:     0.024,
   padLLandscape:    0.018,
   padRPortrait:     0.028,
   padRLandScape:    0.024,
-  leftRelax:        0.050  // increase to 0.035 if left is over-cropped
+  leftRelax:        0.050  // pull more from left (include first letters)
 };
 
 /* ---------- Static crop (backward compatibility) ---------- */
@@ -116,7 +116,6 @@ const STATIC_CROP={
   portrait:{ top:0.755,height:0.235,mapCut:0.205,pad:{top:0.020,bottom:0.018,left:0.028,right:0.024} },
   landscape:{ top:0.775,height:0.190,mapCut:0.185,pad:{top:0.016,bottom:0.014,left:0.022,right:0.020} }
 };
-const LEFT_RELAX = 0.030;
 
 /* Downscale huge images for consistent OCR performance */
 async function resampleImage(dataURL, maxSide = 1600){
@@ -146,7 +145,7 @@ async function cropHudStatic(dataURL){
   sy = Math.max(0, sy - Math.floor(H*P.pad.top));
   sh = Math.min(H - sy, sh + Math.floor(H*(P.pad.top + P.pad.bottom)));
 
-  let sx=Math.floor(W*(P.mapCut + P.pad.left - LEFT_RELAX));
+  let sx=Math.floor(W*(P.mapCut + P.pad.left - HUDCFG.leftRelax));
   let sw=W - sx - Math.floor(W*P.pad.right);
   if (sx<0) sx=0;
   if (sy<0) sy=0;
@@ -213,7 +212,7 @@ async function cropHudSmart(dataURL){
   for (let y = bestTop; y >= searchStart; y--){
     if (deriv[y] < localMin.v) localMin = {y, v: deriv[y]};
   }
-  const TOP_EDGE_BOOST = Math.floor(H * 0.015);   // move top ~1.5% higher → taller band
+  const TOP_EDGE_BOOST = Math.floor(H * 0.015);
   let hudTopY = fromY + Math.max(0, localMin.y - TOP_EDGE_BOOST);
 
   // Safety: don’t go above minTopFrac
@@ -225,9 +224,8 @@ async function cropHudSmart(dataURL){
 
   const HUD_FRAC = isPortrait ? HUDCFG.hudFracPortrait : HUDCFG.hudFracLandscape;
   let sh = Math.floor(H * HUD_FRAC);
-   // keep at least 1% extra height if available, but never cross the footer gap
-   const MIN_EXTRA = Math.floor(H * 0.01);
-   sh = Math.min(sh, Math.max(8, (hudBottomY - hudTopY) + MIN_EXTRA));
+  const MIN_EXTRA = Math.floor(H * 0.01);
+  sh = Math.min(sh, Math.max(8, (hudBottomY - hudTopY) + MIN_EXTRA));
 
   let sy = hudTopY;
 
@@ -244,6 +242,9 @@ async function cropHudSmart(dataURL){
   sy = Math.max(0, Math.min(sy, H - 1));
   sw = Math.max(1, Math.min(sw, W - sx));
   sh = Math.max(1, Math.min(sh, H - sy));
+
+  // Save rect for Manual Editor (natural px)
+  mc.imgW = W; mc.imgH = H; mc.autoRect = { x: sx, y: sy, w: sw, h: sh };
 
   const out = document.createElement('canvas');
   out.width = sw; out.height = sh;
@@ -262,8 +263,8 @@ async function preprocessForOCR(cropDataURL){
   const src=await loadImage(cropDataURL);
   const w=src.naturalWidth, h=src.naturalHeight;
 
-  const cutTop    = Math.floor(h*0.12); // keep more top text
-  const cutBottom = Math.floor(h*0.01);
+  const cutTop    = Math.floor(h*0.12); // preserve more top
+  const cutBottom = Math.floor(h*0.01); // preserve bottom/date line
   const h2=h - cutTop - cutBottom;
 
   const c=document.createElement('canvas');
@@ -297,12 +298,12 @@ async function preprocessForOCR(cropDataURL){
 
 /* ---------- Drag & drop (macOS/Safari-safe) ---------- */
 
-// 1) Stop navigation on drop anywhere
+// Stop navigation on drop anywhere
 ['dragover','drop'].forEach(ev =>
   window.addEventListener(ev, e => { e.preventDefault(); }, { passive:false })
 );
 
-// 2) Extract a File from DataTransfer
+// Extract a File from DataTransfer
 function pickFileFromDataTransfer(dt){
   if (!dt) return null;
   if (dt.items && dt.items.length){
@@ -325,7 +326,7 @@ function pickFileFromDataTransfer(dt){
   return null;
 }
 
-// 3) Visual affordances
+// Visual affordances
 ['dragenter','dragover'].forEach(t => dropArea?.addEventListener(t, e=>{
   e.preventDefault();
   if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
@@ -336,32 +337,30 @@ function pickFileFromDataTransfer(dt){
   dropArea.classList.remove('dragover');
 }));
 
-// 4) Click/keyboard to open file picker
+// File picker
 dropArea?.addEventListener('click', ()=> fileInput?.click());
 dropArea?.addEventListener('keydown', e => {
   if (e.key === 'Enter' || e.key === ' ') fileInput?.click();
 });
-
-// 5) Re-select same file retriggers change
 fileInput?.addEventListener('click', e => { e.target.value = ''; });
 
-// 6) Handle chooser
+// Handle chooser
 fileInput?.addEventListener('change', e => {
   const f = e.target.files?.[0];
   if (f) acceptAndHandleFile(f);
 });
 
-// 7) Handle drop
+// Handle drop
 dropArea?.addEventListener('drop', e => {
   const f = pickFileFromDataTransfer(e.dataTransfer);
   if (f) acceptAndHandleFile(f);
 });
 
-// 8) Central acceptance + HEIC handling
+// HEIC guard + proceed
 async function acceptAndHandleFile(file){
   const isHeic = /image\/hei[cf]|\.heic$/i.test(file.type) || /\.heic$/i.test(file.name || '');
   if (isHeic){
-    banner('HEIC detected. Please export as JPG/PNG from Photos (File → Export) or change camera format (Most Compatible).', 'error');
+    banner('HEIC detected. Please export as JPG/PNG from Photos or change camera format (Most Compatible).', 'error');
     setPill('upload', 'err');
     return;
   }
@@ -385,6 +384,7 @@ async function handleFile(file){
   dataURL = await resampleImage(dataURL, 1600);   // downscale huge images safely
   imgOriginal && (imgOriginal.src = dataURL);
   setPill('upload','ok');
+  mc.imgURL = dataURL; // for manual editor
 
   // Crop + Preprocess
   setPill('ocr','run');
@@ -393,6 +393,8 @@ async function handleFile(file){
     cropURL = await cropHud(dataURL);             // smart → fallback to static
     processed = await preprocessForOCR(cropURL);
     imgCrop && (imgCrop.src = processed);
+    const btn = document.getElementById('openManual');
+    if (btn) btn.style.display = 'inline-flex';
   }catch(e){
     setPill('ocr','err'); banner('Crop/Preprocess failed.','error'); logToConsole('',{error:String(e)},'[Preprocess error]'); return;
   }
@@ -443,7 +445,7 @@ async function handleFile(file){
 
   setPill('review','ok');
 
-  // Normalize for prefill (YYYY-MM-DD / HH:mm 24h)
+  // Normalize for prefill
   const { date: formDate, time: formTime } = normalizeFormRedirect(parsed.date, parsed.time);
   outDate && (outDate.textContent = formDate);
   outTime && (outTime.textContent = formTime);
@@ -623,7 +625,205 @@ function geoLookup(lat, lon){
   return out;
 }
 
-/* ---------- Console buttons ---------- */
+/* ---------- Manual Crop Editor (draw/resize) ---------- */
+let mc = {
+  enabled: false,
+  imgURL: '',
+  imgW: 0, imgH: 0,
+  viewW: 0, viewH: 0,
+  scaleX: 1, scaleY: 1,
+  rect: { x:0, y:0, w:100, h:100 },
+  autoRect: null
+};
+const openManualBtn = document.getElementById('openManual');
+const editorEl  = document.getElementById('manualEditor');
+const stageEl   = document.getElementById('mcStage');
+const imgEl     = document.getElementById('mcImg');
+const boxEl     = document.getElementById('mcBox');
+const mcApply   = document.getElementById('mcApply');
+const mcCancel  = document.getElementById('mcCancel');
+const mcReset   = document.getElementById('mcReset');
+
+function openManualEditor(){
+  if (!mc.imgURL || !mc.autoRect) { banner('No crop available to adjust yet.', 'error'); return; }
+  imgEl.onload = () => {
+    const rW = imgEl.naturalWidth, rH = imgEl.naturalHeight;
+    const rect = imgEl.getBoundingClientRect();
+    const vw = rect.width || rW, vh = rect.height || rH;
+    mc.viewW = vw; mc.viewH = vh;
+    mc.scaleX = vw / rW; mc.scaleY = vh / rH;
+    mc.rect = { ...mc.autoRect };
+    drawMcBox();
+  };
+  imgEl.src = mc.imgURL;
+  editorEl.classList.remove('hidden');
+  editorEl.setAttribute('aria-hidden','false');
+  mc.enabled = true;
+  attachMcEvents();
+}
+function closeManualEditor(){
+  mc.enabled = false;
+  detachMcEvents();
+  editorEl.classList.add('hidden');
+  editorEl.setAttribute('aria-hidden','true');
+}
+function resetManualRect(){ if (mc.autoRect) mc.rect = { ...mc.autoRect }; drawMcBox(); }
+function drawMcBox(){
+  const vx = mc.rect.x * mc.scaleX;
+  const vy = mc.rect.y * mc.scaleY;
+  const vw = mc.rect.w * mc.scaleX;
+  const vh = mc.rect.h * mc.scaleY;
+  boxEl.style.left   = `${vx}px`;
+  boxEl.style.top    = `${vy}px`;
+  boxEl.style.width  = `${vw}px`;
+  boxEl.style.height = `${vh}px`;
+}
+function clampRect(r){
+  r.x = Math.max(0, Math.min(r.x, mc.imgW - 1));
+  r.y = Math.max(0, Math.min(r.y, mc.imgH - 1));
+  r.w = Math.max(8, Math.min(r.w, mc.imgW - r.x));
+  r.h = Math.max(8, Math.min(r.h, mc.imgH - r.y));
+  return r;
+}
+async function applyManualSelection(){
+  const c = document.createElement('canvas');
+  c.width = mc.rect.w; c.height = mc.rect.h;
+  const ctx = c.getContext('2d');
+  const img = new Image();
+  img.onload = async () => {
+    ctx.drawImage(img, mc.rect.x, mc.rect.y, mc.rect.w, mc.rect.h, 0, 0, mc.rect.w, mc.rect.h);
+    const manualCropURL = c.toDataURL('image/png');
+
+    try{
+      const processed = await preprocessForOCR(manualCropURL);
+      imgCrop && (imgCrop.src = processed);
+
+      const res = await Tesseract.recognize(
+        processed,
+        'eng',
+        { logger:()=>{}, tessedit_pageseg_mode:6, tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789:+.,/°- ' }
+      );
+      const rawText = (res?.data?.text || '').trim();
+      logToConsole(rawText, null, '[OCR complete (manual)]');
+
+      setPill('ocr','ok');
+      setPill('parse','run');
+      const parsed = parseHudText(rawText);
+      logToConsole(rawText, parsed, '[Parse complete (manual)]');
+
+      if(!parsed.date || !parsed.time || isNaN(parsed.lat) || isNaN(parsed.lon) || !parsed.address){
+        setPill('parse','err'); banner('Could not parse all fields from adjusted crop.', 'error'); return;
+      }
+      setPill('parse','ok');
+
+      outDate && (outDate.textContent = parsed.date);
+      outTime && (outTime.textContent = parsed.time);
+      outLat  && (outLat.textContent  = parsed.lat.toFixed(6));
+      outLon  && (outLon.textContent  = parsed.lon.toFixed(6));
+      outAddr && (outAddr.textContent = parsed.address);
+
+      setPill('geo','run');
+      try{ await ensureGeo(); }catch{ setPill('geo','err'); banner('Failed to load GeoJSON.','error'); return; }
+      const gj = geoLookup(parsed.lat, parsed.lon);
+      if(!gj.ward || !gj.beat || !gj.ps){ setPill('geo','err'); banner('GeoJSON lookup failed.', 'error'); return; }
+      outWard && (outWard.textContent = gj.ward);
+      outBeat && (outBeat.textContent = gj.beat);
+      outPS   && (outPS.textContent   = gj.ps);
+      setPill('geo','ok'); setPill('review','ok');
+
+      const { date: formDate, time: formTime } = normalizeFormRedirect(parsed.date, parsed.time);
+      outDate && (outDate.textContent = formDate);
+      outTime && (outTime.textContent = formTime);
+
+      const url = new URL(FORM_BASE);
+      url.searchParams.set(ENTRY.date, formDate);
+      url.searchParams.set(ENTRY.time, formTime);
+      url.searchParams.set(ENTRY.lat,  parsed.lat.toFixed(6));
+      url.searchParams.set(ENTRY.lon,  parsed.lon.toFixed(6));
+      url.searchParams.set(ENTRY.ward, gj.ward);
+      url.searchParams.set(ENTRY.beat, gj.beat);
+      url.searchParams.set(ENTRY.addr, parsed.address);
+      url.searchParams.set(ENTRY.ps,   gj.ps);
+      lastRedirectUrl = url.toString();
+
+      try{
+        setPill('redirect','run');
+        window.open(lastRedirectUrl, '_blank', 'noopener');
+        setPill('redirect','ok');
+      }catch{
+        setPill('redirect','err');
+        banner('Auto-redirect blocked. Tap the Redirect pill to open.', 'error');
+      }
+    }catch(e){
+      banner('Manual crop failed.', 'error');
+      console.error(e);
+    } finally {
+      closeManualEditor();
+    }
+  };
+  img.src = mc.imgURL;
+}
+
+/* Drag / Resize controls */
+let drag = null; // {mode:'move'|'n'|'ne'... , startX, startY, rect0}
+function attachMcEvents(){
+  boxEl.addEventListener('mousedown', onBoxMouseDown);
+  stageEl.addEventListener('mousedown', onHandleDown, true);
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('mouseup', onMouseUp);
+  boxEl.addEventListener('keydown', onBoxKey);
+  mcApply.addEventListener('click', applyManualSelection);
+  mcCancel.addEventListener('click', closeManualEditor);
+  mcReset.addEventListener('click', resetManualRect);
+}
+function detachMcEvents(){
+  boxEl.removeEventListener('mousedown', onBoxMouseDown);
+  stageEl.removeEventListener('mousedown', onHandleDown, true);
+  window.removeEventListener('mousemove', onMouseMove);
+  window.removeEventListener('mouseup', onMouseUp);
+  boxEl.removeEventListener('keydown', onBoxKey);
+  mcApply.removeEventListener('click', applyManualSelection);
+  mcCancel.removeEventListener('click', closeManualEditor);
+  mcReset.removeEventListener('click', resetManualRect);
+}
+function onBoxMouseDown(e){
+  if ((e.target).classList.contains('mc-h')) return;
+  e.preventDefault();
+  drag = { mode:'move', startX:e.clientX, startY:e.clientY, rect0:{...mc.rect} };
+}
+function onHandleDown(e){
+  const t = e.target;
+  if (!t.classList.contains('mc-h')) return;
+  e.preventDefault();
+  drag = { mode:t.dataset.dir, startX:e.clientX, startY:e.clientY, rect0:{...mc.rect} };
+}
+function onMouseMove(e){
+  if (!drag) return;
+  const dx = (e.clientX - drag.startX) / mc.scaleX;
+  const dy = (e.clientY - drag.startY) / mc.scaleY;
+  let r = { ...drag.rect0 };
+  if (drag.mode === 'move'){
+    r.x += dx; r.y += dy;
+  } else {
+    if (drag.mode.includes('w')) { r.x += dx; r.w -= dx; }
+    if (drag.mode.includes('n')) { r.y += dy; r.h -= dy; }
+    if (drag.mode.includes('e')) { r.w += dx; }
+    if (drag.mode.includes('s')) { r.h += dy; }
+  }
+  clampRect(r); mc.rect = r; drawMcBox();
+}
+function onMouseUp(){ drag = null; }
+function onBoxKey(e){
+  const step = e.shiftKey ? 10 : 1;
+  let r = { ...mc.rect };
+  if (e.key === 'ArrowLeft')  r.x -= step;
+  if (e.key === 'ArrowRight') r.x += step;
+  if (e.key === 'ArrowUp')    r.y -= step;
+  if (e.key === 'ArrowDown')  r.y += step;
+  clampRect(r); mc.rect = r; drawMcBox();
+}
+
+/* ---------- Console buttons & manual open ---------- */
 document.addEventListener('DOMContentLoaded', () => {
   const copyBtn = document.getElementById('consoleCopy');
   const toggleBtn = document.getElementById('consoleToggle');
@@ -644,4 +844,6 @@ document.addEventListener('DOMContentLoaded', () => {
     toggleBtn.setAttribute('aria-expanded', String(hidden));
     toggleBtn.textContent = hidden ? 'Hide' : 'Show';
   });
+
+  document.getElementById('openManual')?.addEventListener('click', openManualEditor);
 });
