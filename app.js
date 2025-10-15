@@ -1,10 +1,9 @@
 /* ==========================================================
    Abandoned Vehicles — Marshal Upload (MCGM)
-   Build: v2025.10.15.S1  (Smart HUD detect + static fallback)
+   Build: v2025.10.15.S3  (Smart HUD v3 + tunables + static fallback)
    - Single GeoJSON for Beats that also contains Ward info
    - Police jurisdiction GeoJSON kept separate
    - Robust OCR + parsing + prefill normalization
-   - NEW: resampleImage(), cropHudSmart() + fallback cropHudStatic()
    ========================================================== */
 
 const $ = (id) => document.getElementById(id);
@@ -35,7 +34,7 @@ const pills = {
 
 let lastRedirectUrl = '';
 
-/* ---------- Badges ---------- */
+/* ---------- CDN badge ---------- */
 function updateCdnBadge(){
   const b = $('cdnBadge'); if(!b) return;
   const ok = !!(window.Tesseract && Tesseract.recognize);
@@ -44,6 +43,22 @@ function updateCdnBadge(){
 }
 document.addEventListener('DOMContentLoaded', updateCdnBadge);
 window.addEventListener('load', updateCdnBadge);
+
+/* ---------- Console ---------- */
+function logToConsole(rawText, parsed, note=''){
+  const pre = $('console-pre'); if (!pre) return;
+  const stamp = new Date().toLocaleTimeString();
+  const safe = (v)=> (v==null?'':String(v));
+  const log = [
+    `⏱ ${stamp} ${note}`,
+    rawText!=='' ? '--- RAW OCR TEXT ---' : '',
+    rawText!=='' ? safe(rawText) : '',
+    parsed!=='' ? '--- PARSED FIELDS ---' : '',
+    (parsed && typeof parsed==='object') ? JSON.stringify(parsed,null,2) : (parsed!==''?safe(parsed):''),
+    '────────────────────────────────────────'
+  ].filter(Boolean).join('\n');
+  pre.textContent = log + '\n' + pre.textContent;
+}
 
 /* ---------- Helpers ---------- */
 function setPill(name, state){
@@ -70,51 +85,47 @@ function resetOutputs(){
 function fileToDataURL(f){ return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=rej; fr.readAsDataURL(f); }); }
 function loadImage(url){ return new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=url; }); }
 
-/* ---------- Console ---------- */
-function logToConsole(rawText, parsed, note=''){
-  const pre = $('console-pre'); if (!pre) return;
-  const stamp = new Date().toLocaleTimeString();
-  const safe = (v)=> (v==null?'':String(v));
-  const log = [
-    `⏱ ${stamp} ${note}`,
-    rawText!=='' ? '--- RAW OCR TEXT ---' : '',
-    rawText!=='' ? safe(rawText) : '',
-    parsed!=='' ? '--- PARSED FIELDS ---' : '',
-    (parsed && typeof parsed==='object') ? JSON.stringify(parsed,null,2) : (parsed!==''?safe(parsed):''),
-    '────────────────────────────────────────'
-  ].filter(Boolean).join('\n');
-  pre.textContent = log + '\n' + pre.textContent;
-}
-
 /* ---------- Form mapping ---------- */
 const FORM_BASE='https://docs.google.com/forms/d/e/1FAIpQLSeo-xlOSxvG0IwtO5MkKaTJZNJkgTsmgZUw-FBsntFlNdRnCw/viewform?usp=pp_url';
 const ENTRY={date:'entry.1911996449',time:'entry.1421115881',lat:'entry.419288992',lon:'entry.113122688',ward:'entry.1625337207',beat:'entry.1058310891',addr:'entry.1188611077',ps:'entry.1555105834'};
 
 /* ==========================================================
-   CROP PIPELINE
-   - We keep the original static crop (backward compatible)
-   - Add smart HUD detection for very high-res images
-   - Try smart first; on failure, fall back to static
-   - Also downscale huge images for stable OCR performance
+   CROP PIPELINE — tunables + smart + fallback
    ========================================================== */
 
-/* ---------- Static crop (unchanged for backward compatibility) ---------- */
+/* ===== HUD CROP TUNABLES ===== */
+const HUDCFG = {
+  scanStartFrac: 0.72,     // start scanning for footer from 72% height
+  minTopFrac:    0.60,     // crop won't start above 60% of height
+  footerGapFrac: 0.010,    // keep 1.0% gap above footer
+
+  hudFracPortrait:  0.26,  // target HUD band height (portrait)
+  hudFracLandscape: 0.25,  // target HUD band height (landscape)
+
+  mapCutPortrait:   0.20,  // skip minimap area on the left
+  mapCutLandscape:  0.18,
+  padLPortrait:     0.028,
+  padLLandscape:    0.022,
+  padRPortrait:     0.028,
+  padRLandScape:    0.024,
+  leftRelax:        0.030  // increase to 0.035 if left is over-cropped
+};
+
+/* ---------- Static crop (backward compatibility) ---------- */
 const STATIC_CROP={
   portrait:{ top:0.755,height:0.235,mapCut:0.205,pad:{top:0.020,bottom:0.018,left:0.028,right:0.024} },
   landscape:{ top:0.775,height:0.190,mapCut:0.185,pad:{top:0.016,bottom:0.014,left:0.022,right:0.020} }
 };
 const LEFT_RELAX = 0.030;
 
-/* Resize very large images to keep OCR fast & consistent */
+/* Downscale huge images for consistent OCR performance */
 async function resampleImage(dataURL, maxSide = 1600){
   const img = await loadImage(dataURL);
-  const { naturalWidth: W, naturalHeight: H } = img;
+  const W = img.naturalWidth, H = img.naturalHeight;
   const side = Math.max(W, H);
   if (side <= maxSide) return dataURL;
-
-  const scale = maxSide / side;
-  const w = Math.round(W * scale), h = Math.round(H * scale);
-
+  const k = maxSide / side;
+  const w = Math.round(W * k), h = Math.round(H * k);
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
   const ctx = c.getContext('2d');
@@ -154,9 +165,8 @@ async function cropHudSmart(dataURL){
   const W = img.naturalWidth, H = img.naturalHeight;
   const isPortrait = H >= W;
 
-  // ===== 1) Scan the bottom quarter to locate the solid black footer =====
-  const scanStartFrac = 0.72;                    // start scanning from 72% height
-  const fromY = Math.floor(H * scanStartFrac);
+  // 1) Locate the solid black footer in the bottom window
+  const fromY = Math.floor(H * HUDCFG.scanStartFrac);
   const ch = H - fromY;
 
   const c = document.createElement('canvas');
@@ -164,7 +174,6 @@ async function cropHudSmart(dataURL){
   const ctx = c.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(img, 0, -fromY);
 
-  // Row luminance (mean of grayscale)
   const means = new Float32Array(ch);
   for (let y = 0; y < ch; y++) {
     const row = ctx.getImageData(0, y, W, 1).data;
@@ -172,13 +181,10 @@ async function cropHudSmart(dataURL){
     for (let i = 0; i < row.length; i += 4) s += (row[i] + row[i+1] + row[i+2]) / 3;
     means[y] = s / (row.length / 4);
   }
-
-  // Adaptive threshold to find "very dark" rows (footer)
   let gSum = 0; for (let i = 0; i < ch; i++) gSum += means[i];
   const gMean = gSum / Math.max(1, ch);
-  const Tdark = Math.min(85, gMean - 45);        // footer is near-black
+  const Tdark = Math.min(85, gMean - 45);
 
-  // Longest contiguous dark block near the bottom
   let bestTop = -1, bestLen = 0, curTop = -1, curLen = 0;
   for (let y = 0; y < ch; y++){
     if (means[y] < Tdark){
@@ -196,52 +202,42 @@ async function cropHudSmart(dataURL){
   }
   if (bestTop < 0) throw new Error('Footer not found');
 
-  const footerTopY = fromY + bestTop;            // absolute Y where footer begins
+  const footerTopY = fromY + bestTop;
 
-  // ===== 2) Find the HUD top edge by detecting the strong down-jump in brightness =====
-  // Compute vertical derivative (downward differences) above the footer
+  // 2) Find strong bright→dark edge above footer (HUD top)
   const deriv = new Float32Array(ch);
   for (let y = 1; y < ch; y++) deriv[y] = means[y] - means[y-1];
+  const searchStart = Math.max(0, bestTop - Math.floor(H * 0.18));
 
-  // Search upwards from the footer for a big negative slope (bright → dark)
-  const searchStart = Math.max(0, bestTop - Math.floor(H * 0.18)); // ~18% of H window above footer
   let localMin = {y: bestTop, v: 0};
   for (let y = bestTop; y >= searchStart; y--){
     if (deriv[y] < localMin.v) localMin = {y, v: deriv[y]};
   }
-
-  // Candidate HUD top is a bit above the strongest dark transition
-  const TOP_EDGE_BOOST = Math.floor(H * 0.01);   // 1% padding above detected edge
+  const TOP_EDGE_BOOST = Math.floor(H * 0.01);
   let hudTopY = fromY + Math.max(0, localMin.y - TOP_EDGE_BOOST);
 
-  // Safety clamp so we never start too high
-  const MIN_TOP_FRAC = 0.60;                     // let it rise if needed on tall frames
-  if (hudTopY < Math.floor(H * MIN_TOP_FRAC)) hudTopY = Math.floor(H * MIN_TOP_FRAC);
+  // Safety: don’t go above minTopFrac
+  if (hudTopY < Math.floor(H * HUDCFG.minTopFrac)) hudTopY = Math.floor(H * HUDCFG.minTopFrac);
 
-  // ===== 3) Build the crop band just above the footer =====
-  const FOOTER_GAP = Math.floor(H * 0.006);      // keep a small clear gap above footer
-  const hudBottomY = Math.max(footerTopY - FOOTER_GAP, hudTopY + 1);
+  // 3) Build crop band just above footer with a fixed gap
+  const footGap = Math.floor(H * HUDCFG.footerGapFrac);
+  const hudBottomY = Math.max(footerTopY - footGap, hudTopY + 1);
 
-  // Target HUD height — slightly taller on landscape
-  const HUD_FRAC = isPortrait ? 0.26 : 0.24;     // was 0.22 on landscape
+  const HUD_FRAC = isPortrait ? HUDCFG.hudFracPortrait : HUDCFG.hudFracLandscape;
   let sh = Math.floor(H * HUD_FRAC);
-
-  // Don’t run into the footer
   sh = Math.min(sh, Math.max(8, hudBottomY - hudTopY));
 
-  // Final Y
   let sy = hudTopY;
 
-  // ===== 4) Left/right trim (skip the minimap & right padding) =====
-  const mapCut = isPortrait ? 0.20 : 0.18;
-  const padL   = isPortrait ? 0.028 : 0.022;
-  const padR   = isPortrait ? 0.026 : 0.022;     // a touch more on the right
-  const LEFT_RELAX = 0.030;
+  // 4) Horizontal trims (skip minimap & add padding)
+  const mapCut = isPortrait ? HUDCFG.mapCutPortrait : HUDCFG.mapCutLandscape;
+  const padL   = isPortrait ? HUDCFG.padLPortrait   : HUDCFG.padLLandscape;
+  const padR   = isPortrait ? HUDCFG.padRPortrait   : HUDCFG.padRLandScape;
 
-  let sx = Math.floor(W * (mapCut + padL - LEFT_RELAX));
+  let sx = Math.floor(W * (mapCut + padL - HUDCFG.leftRelax));
   let sw = W - sx - Math.floor(W * padR);
 
-  // ===== 5) Clamp & draw =====
+  // 5) Clamp & draw
   sx = Math.max(0, Math.min(sx, W - 1));
   sy = Math.max(0, Math.min(sy, H - 1));
   sw = Math.max(1, Math.min(sw, W - sx));
@@ -253,22 +249,19 @@ async function cropHudSmart(dataURL){
   return out.toDataURL('image/png');
 }
 
-/* Unified crop that tries smart first, then falls back to static (old behaviour) */
+/* Unified crop: smart first → static fallback */
 async function cropHud(dataURL){
-  try {
-    return await cropHudSmart(dataURL);
-  } catch {
-    return await cropHudStatic(dataURL);
-  }
+  try { return await cropHudSmart(dataURL); }
+  catch { return await cropHudStatic(dataURL); }
 }
 
-/* ---------- Preprocess (light) ---------- */
+/* ---------- Preprocess (light, adaptive) ---------- */
 async function preprocessForOCR(cropDataURL){
   const src=await loadImage(cropDataURL);
   const w=src.naturalWidth, h=src.naturalHeight;
 
-  const cutTop=Math.floor(h*0.18);
-  const cutBottom=Math.floor(h*0.04);
+  const cutTop    = Math.floor(h*0.13); // keep more top text
+  const cutBottom = Math.floor(h*0.04);
   const h2=h - cutTop - cutBottom;
 
   const c=document.createElement('canvas');
@@ -276,17 +269,23 @@ async function preprocessForOCR(cropDataURL){
   const ctx=c.getContext('2d',{willReadFrequently:true});
   ctx.drawImage(src, 0, -cutTop, w, h);
 
+  // ×3 upsample
   const up=document.createElement('canvas');
   up.width=c.width*3; up.height=c.height*3;
   const uctx=up.getContext('2d');
   uctx.imageSmoothingEnabled=true;
   uctx.drawImage(c,0,0,up.width,up.height);
 
+  // Adaptive binarization around mean
   let im = uctx.getImageData(0,0,up.width,up.height);
   const d=im.data;
+  let sum = 0, npx = (d.length/4)|0;
+  for (let i=0;i<d.length;i+=4){ sum += (d[i]+d[i+1]+d[i+2])/3; }
+  const mean = sum / Math.max(1, npx);
+  const T = Math.min(200, Math.max(120, mean + 5));
+
   for(let i=0;i<d.length;i+=4){
-    const avg=(d[i]+d[i+1]+d[i+2])/3;
-    const v = avg>140?255:0;
+    const v = (d[i]+d[i+1]+d[i+2])/3 < T ? 0 : 255;
     d[i]=d[i+1]=d[i+2]=v; d[i+3]=255;
   }
   uctx.putImageData(im,0,0);
@@ -296,24 +295,21 @@ async function preprocessForOCR(cropDataURL){
 
 /* ---------- Drag & drop (macOS/Safari-safe) ---------- */
 
-// 1) Stop the browser from navigating away when a file is dropped anywhere.
+// 1) Stop navigation on drop anywhere
 ['dragover','drop'].forEach(ev =>
   window.addEventListener(ev, e => { e.preventDefault(); }, { passive:false })
 );
 
-// 2) Utility to extract a File from DataTransfer, preferring images (uses items for Safari)
+// 2) Extract a File from DataTransfer
 function pickFileFromDataTransfer(dt){
   if (!dt) return null;
-
-  // Prefer items (Safari-friendly)
   if (dt.items && dt.items.length){
     for (const it of dt.items){
       if (it.kind === 'file'){
         const f = it.getAsFile();
-        if (f && /^image\//i.test(f.type)) return f;   // image first
+        if (f && /^image\//i.test(f.type)) return f;
       }
     }
-    // Fallback: take the first file item if no explicit image type matched
     for (const it of dt.items){
       if (it.kind === 'file'){
         const f = it.getAsFile();
@@ -321,12 +317,9 @@ function pickFileFromDataTransfer(dt){
       }
     }
   }
-
-  // Fallback to files list
   if (dt.files && dt.files.length){
     return [...dt.files].find(x=>/^image\//i.test(x.type)) || dt.files[0];
   }
-
   return null;
 }
 
@@ -347,10 +340,10 @@ dropArea?.addEventListener('keydown', e => {
   if (e.key === 'Enter' || e.key === ' ') fileInput?.click();
 });
 
-// 5) Make re-selecting the same file re-trigger change
+// 5) Re-select same file retriggers change
 fileInput?.addEventListener('click', e => { e.target.value = ''; });
 
-// 6) Handle file chooser
+// 6) Handle chooser
 fileInput?.addEventListener('change', e => {
   const f = e.target.files?.[0];
   if (f) acceptAndHandleFile(f);
@@ -364,22 +357,17 @@ dropArea?.addEventListener('drop', e => {
 
 // 8) Central acceptance + HEIC handling
 async function acceptAndHandleFile(file){
-  // Some Macs produce HEIC; Safari may read it, but canvas/other browsers won’t.
   const isHeic = /image\/hei[cf]|\.heic$/i.test(file.type) || /\.heic$/i.test(file.name || '');
-
   if (isHeic){
     banner('HEIC detected. Please export as JPG/PNG from Photos (File → Export) or change camera format (Most Compatible).', 'error');
     setPill('upload', 'err');
     return;
   }
-
   if (!/^image\/(jpe?g|png|gif|bmp|webp)$/i.test(file.type)){
     banner('Please choose an image (JPG/PNG).', 'error');
     setPill('upload', 'err');
     return;
   }
-
-  // proceed
   handleFile(file);
 }
 
@@ -392,7 +380,7 @@ async function handleFile(file){
   // Upload
   setPill('upload','run');
   let dataURL = await fileToDataURL(file);
-  dataURL = await resampleImage(dataURL, 1600);   // ↓ NEW: downscale huge images safely
+  dataURL = await resampleImage(dataURL, 1600);   // downscale huge images safely
   imgOriginal && (imgOriginal.src = dataURL);
   setPill('upload','ok');
 
@@ -481,7 +469,6 @@ async function handleFile(file){
     banner('Auto-redirect blocked. Tap the Redirect pill to open.', 'error');
   }
 
-  // Make Redirect pill clickable + pulse
   if (pills.redirect){
     pills.redirect.classList.add('pulse','ok');
     pills.redirect.onclick = () => { if (lastRedirectUrl) window.open(lastRedirectUrl, '_blank', 'noopener'); };
@@ -493,7 +480,6 @@ async function handleFile(file){
 function parseHudText(raw){
   let lines = raw.split(/\n/).map(s=>s.trim()).filter(Boolean);
 
-  // Start near location line if present
   const locIdx = lines.findIndex(l => /(India|Maharashtra|Mumbai|Navi Mumbai)/i.test(l));
   if (locIdx > 0) lines = lines.slice(locIdx);
   if (lines.length < 3) return {};
@@ -501,7 +487,6 @@ function parseHudText(raw){
   const last = lines[lines.length - 1];
   const prev = lines[lines.length - 2];
 
-  // Address above the last 2 lines
   let addr  = lines.slice(0, lines.length - 2).join(', ');
   addr = addr
     .replace(/GPS\s*Map\s*Camera/gi,' ')
@@ -510,13 +495,11 @@ function parseHudText(raw){
     .replace(/^[,\s]+|[,\s]+$/g,'')
     .trim();
 
-  // Lat/Lon primary attempt from 'prev'
   let lat = NaN, lon = NaN;
   const scrubPrev = prev.replace(/[|]/g,' ').replace(/°/g,' ').replace(/,\s*/g,' ');
   const m = scrubPrev.match(/(-?\d{1,2}\.\d+).+?(-?\d{1,3}\.\d+)/);
   if (m){ lat = parseFloat(m[1]); lon = parseFloat(m[2]); }
 
-  // Fallback: scan whole raw for two decimals in Mumbai bounds
   if (isNaN(lat) || isNaN(lon)) {
     const allNums = (raw.match(/-?\d{1,3}\.\d+/g) || []).map(parseFloat);
     for (let i=0;i<allNums.length-1;i++){
@@ -526,18 +509,17 @@ function parseHudText(raw){
     }
   }
 
-  // Date & Time
   const pool = [last, `${prev} ${last}`];
   let date = '', time = '';
   for (const s of pool){
     if (!date){
-      const m1 = s.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})/); // dd/mm/yyyy
-      const m2 = s.match(/(\d{4}[\/-]\d{1,2}[\/-]\d{1,2})/); // yyyy-mm-dd
+      const m1 = s.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})/);
+      const m2 = s.match(/(\d{4}[\/-]\d{1,2}[\/-]\d{1,2})/);
       if (m1) date = m1[1]; else if (m2) date = m2[1];
     }
     if (!time){
-      const t1 = s.match(/(\d{1,2}):(\d{2})\s*([AP]M)/i);   // 12h
-      const t2 = s.match(/(\d{1,2}):(\d{2})(?!\s*[AP]M)/i); // 24h
+      const t1 = s.match(/(\d{1,2}):(\d{2})\s*([AP]M)/i);
+      const t2 = s.match(/(\d{1,2}):(\d{2})(?!\s*[AP]M)/i);
       if (t1) time = `${t1[1]}:${t1[2]} ${t1[3].toUpperCase()}`;
       else if (t2) time = `${t2[1]}:${t2[2]}`;
     }
@@ -549,15 +531,13 @@ function parseHudText(raw){
 /* ---------- Prefill: YYYY-MM-DD & HH:mm (24h) ---------- */
 function pad2(n){ return n<10 ? '0'+n : String(n); }
 function normalizeFormRedirect(dateStr, timeStr){
-  // DATE
   let yyyy, mm, dd;
-  let m1 = (dateStr||'').match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/); // dd/mm/yyyy
-  let m2 = (dateStr||'').match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/); // yyyy-mm-dd
+  let m1 = (dateStr||'').match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  let m2 = (dateStr||'').match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/);
   if (m1){ dd=+m1[1]; mm=+m1[2]; yyyy=+m1[3]; }
   else if (m2){ yyyy=+m2[1]; mm=+m2[2]; dd=+m2[3]; }
   const formDate = (yyyy && mm && dd) ? `${yyyy}-${pad2(mm)}-${pad2(dd)}` : (dateStr||'');
 
-  // TIME
   let HH, Min;
   const t12 = (timeStr||'').match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
   const t24 = (timeStr||'').match(/^(\d{1,2}):(\d{2})$/);
@@ -569,19 +549,12 @@ function normalizeFormRedirect(dateStr, timeStr){
     HH = +t24[1]; Min = t24[2];
   }
   const formTime = (HH!=null && Min!=null) ? `${pad2(HH)}:${Min}` : (timeStr||'');
-
   return { date: formDate, time: formTime };
 }
 
-/* ---------- Geo (Single Beats + Ward, plus Police) ---------- */
+/* ---------- Geo (Beats+Ward merged, Police separate) ---------- */
 let gjB=null, gjP=null;
 
-/**
- * ensureGeo()
- * Loads:
- * - data/beats.geojson  → features include both Beat & Ward in properties
- * - data/police_jurisdiction.geojson
- */
 async function ensureGeo(){
   if(gjB && gjP) return;
   const [beats, police] = await Promise.all([
@@ -612,13 +585,6 @@ function inPoly(poly,[x,y]){
   return inside;
 }
 
-/**
- * geoLookup(lat, lon)
- * Returns { ward, beat, ps }
- * - Ward & Beat from gjB (single merged file)
- * - Police Station from gjP
- * Property fallbacks included for robustness.
- */
 function geoLookup(lat, lon){
   const out = { ward:'', beat:'', ps:'' };
   if (!gjB || !gjP) return out;
@@ -629,29 +595,21 @@ function geoLookup(lat, lon){
     : g?.type === 'MultiPolygon' ? g.coordinates.some(r => inPoly(r, pt))
     : false;
 
-  // Beats (with Ward embedded)
   for (const f of gjB.features) {
     if (inG(f.geometry)) {
       const p = f.properties || {};
-
-      // Pull ward from common keys, now including "description"
       const wardRaw = p.WARD ?? p.WARD_NAME ?? p.ward ?? p.description ?? p.DESCRIPTION ?? p.NAME ?? p.name ?? '';
-      // Pull beat from common keys; prefer explicit beat fields, else Name/name
       let beatRaw = p.BEAT_NO ?? p.BEAT ?? p.beat ?? p.NAME ?? p.Name ?? p.name ?? '';
-
-      // Optional: if Name contains patterns like "BEAT 1", keep it tidy
       if (!p.BEAT_NO && !p.BEAT && typeof beatRaw === 'string') {
         const m = beatRaw.match(/BEAT\s*\w+/i);
-        if (m) beatRaw = m[0]; // e.g., "BEAT 1"
+        if (m) beatRaw = m[0];
       }
-
-      out.ward = String(wardRaw).trim();             // e.g., "R/N"
-      out.beat = String(beatRaw).trim();             // e.g., "BEAT 1"
+      out.ward = String(wardRaw).trim();
+      out.beat = String(beatRaw).trim();
       break;
     }
   }
 
-  // Police
   for (const f of gjP.features) {
     if (inG(f.geometry)) {
       const p = f.properties || {};
