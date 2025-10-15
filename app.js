@@ -96,19 +96,19 @@ const ENTRY={date:'entry.1911996449',time:'entry.1421115881',lat:'entry.41928899
 /* ===== HUD CROP TUNABLES ===== */
 const HUDCFG = {
   scanStartFrac: 0.72,     // start scanning for footer from 72% height
-  minTopFrac:    0.60,     // crop won't start above 60% of height
-  footerGapFrac: 0.010,    // keep 1.0% gap above footer
+  minTopFrac:    0.58,     // crop won't start above 60% of height
+  footerGapFrac: 0.008,    // keep 1.0% gap above footer
 
-  hudFracPortrait:  0.26,  // target HUD band height (portrait)
-  hudFracLandscape: 0.165,  // target HUD band height (landscape)
+  hudFracPortrait:  0.29,  // target HUD band height (portrait)
+  hudFracLandscape: 0.27,  // target HUD band height (landscape)
 
-  mapCutPortrait:   0.20,  // skip minimap area on the left
-  mapCutLandscape:  0.18,
-  padLPortrait:     0.028,
-  padLLandscape:    0.022,
+  mapCutPortrait:   0.185,  // skip minimap area on the left
+  mapCutLandscape:  0.158,
+  padLPortrait:     0.024,
+  padLLandscape:    0.018,
   padRPortrait:     0.028,
   padRLandScape:    0.024,
-  leftRelax:        0.042  // increase to 0.035 if left is over-cropped
+  leftRelax:        0.050  // increase to 0.035 if left is over-cropped
 };
 
 /* ---------- Static crop (backward compatibility) ---------- */
