@@ -1,9 +1,10 @@
 /* ==========================================================
    Abandoned Vehicles — Marshal Upload (MCGM)
-   Build: v2025.09.25.M1
+   Build: v2025.10.15.S1  (Smart HUD detect + static fallback)
    - Single GeoJSON for Beats that also contains Ward info
    - Police jurisdiction GeoJSON kept separate
    - Robust OCR + parsing + prefill normalization
+   - NEW: resampleImage(), cropHudSmart() + fallback cropHudStatic()
    ========================================================== */
 
 const $ = (id) => document.getElementById(id);
@@ -89,14 +90,41 @@ function logToConsole(rawText, parsed, note=''){
 const FORM_BASE='https://docs.google.com/forms/d/e/1FAIpQLSeo-xlOSxvG0IwtO5MkKaTJZNJkgTsmgZUw-FBsntFlNdRnCw/viewform?usp=pp_url';
 const ENTRY={date:'entry.1911996449',time:'entry.1421115881',lat:'entry.419288992',lon:'entry.113122688',ward:'entry.1625337207',beat:'entry.1058310891',addr:'entry.1188611077',ps:'entry.1555105834'};
 
-/* ---------- Static crop ---------- */
+/* ==========================================================
+   CROP PIPELINE
+   - We keep the original static crop (backward compatible)
+   - Add smart HUD detection for very high-res images
+   - Try smart first; on failure, fall back to static
+   - Also downscale huge images for stable OCR performance
+   ========================================================== */
+
+/* ---------- Static crop (unchanged for backward compatibility) ---------- */
 const STATIC_CROP={
   portrait:{ top:0.755,height:0.235,mapCut:0.205,pad:{top:0.020,bottom:0.018,left:0.028,right:0.024} },
   landscape:{ top:0.775,height:0.190,mapCut:0.185,pad:{top:0.016,bottom:0.014,left:0.022,right:0.020} }
 };
 const LEFT_RELAX = 0.030;
 
-async function cropHud(dataURL){
+/* Resize very large images to keep OCR fast & consistent */
+async function resampleImage(dataURL, maxSide = 1600){
+  const img = await loadImage(dataURL);
+  const { naturalWidth: W, naturalHeight: H } = img;
+  const side = Math.max(W, H);
+  if (side <= maxSide) return dataURL;
+
+  const scale = maxSide / side;
+  const w = Math.round(W * scale), h = Math.round(H * scale);
+
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(img, 0, 0, w, h);
+  return c.toDataURL('image/jpeg', 0.92);
+}
+
+/* Old static crop */
+async function cropHudStatic(dataURL){
   const img=await loadImage(dataURL);
   const W=img.naturalWidth, H=img.naturalHeight;
   const isPortrait=H>=W;
@@ -118,6 +146,75 @@ async function cropHud(dataURL){
   c.width=sw; c.height=sh;
   c.getContext('2d').drawImage(img, sx,sy,sw,sh, 0,0,sw,sh);
   return c.toDataURL('image/png');
+}
+
+/* Smart HUD finder for high-res photos */
+async function cropHudSmart(dataURL){
+  const img = await loadImage(dataURL);
+  const W = img.naturalWidth, H = img.naturalHeight;
+  const isPortrait = H >= W;
+
+  // Scan the bottom 45% of the image for a dark/contrasty HUD band.
+  const fromY = Math.floor(H * 0.55);
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H - fromY;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, -fromY);
+
+  const rowStats = [];
+  for (let y = 0; y < c.height; y += 2) { // step 2px for speed
+    const line = ctx.getImageData(0, y, c.width, 1).data;
+    let s = 0, s2 = 0, n = 0;
+    for (let i = 0; i < line.length; i += 4) {
+      const v = (line[i] + line[i+1] + line[i+2]) / 3;
+      s += v; s2 += v * v; n++;
+    }
+    const mean = s / n;
+    const std  = Math.sqrt(Math.max(0, (s2/n) - mean*mean));
+    rowStats.push({ y, mean, std });
+  }
+
+  // Heuristic: HUD band tends to be darker and texty (higher std).
+  let y0 = -1;
+  let run = 0;
+  for (let i = 0; i < rowStats.length; i++) {
+    const { mean, std } = rowStats[i];
+    if (mean < 195 && std > 18) run++; else run = 0;
+    if (run >= 6) { y0 = rowStats[i - 5].y; break; }
+  }
+  if (y0 < 0) throw new Error('HUD band not found');
+
+  // Define crop: start a little above detected top, include a safe height
+  const safeTop = Math.max(0, fromY + y0 - Math.floor(H * 0.02));
+  const safeH   = Math.min(Math.floor(H * (isPortrait ? 0.26 : 0.22)), H - safeTop);
+
+  // Left: keep minimap cut logic but slightly adaptive
+  const mapCut = isPortrait ? 0.20 : 0.18;
+  const padL = isPortrait ? 0.028 : 0.022;
+  const padR = isPortrait ? 0.024 : 0.020;
+
+  let sx = Math.floor(W * (mapCut + padL - LEFT_RELAX));
+  let sw = W - sx - Math.floor(W * padR);
+  let sy = safeTop, sh = safeH;
+
+  if (sx < 0) sx = 0;
+  if (sy < 0) sy = 0;
+  if (sx + sw > W) sw = W - sx;
+  if (sy + sh > H) sh = H - sy;
+
+  const out = document.createElement('canvas');
+  out.width = sw; out.height = sh;
+  out.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+  return out.toDataURL('image/png');
+}
+
+/* Unified crop that tries smart first, then falls back to static (old behaviour) */
+async function cropHud(dataURL){
+  try {
+    return await cropHudSmart(dataURL);
+  } catch {
+    return await cropHudStatic(dataURL);
+  }
 }
 
 /* ---------- Preprocess (light) ---------- */
@@ -249,7 +346,8 @@ async function handleFile(file){
 
   // Upload
   setPill('upload','run');
-  const dataURL = await fileToDataURL(file);
+  let dataURL = await fileToDataURL(file);
+  dataURL = await resampleImage(dataURL, 1600);   // ↓ NEW: downscale huge images safely
   imgOriginal && (imgOriginal.src = dataURL);
   setPill('upload','ok');
 
@@ -257,7 +355,7 @@ async function handleFile(file){
   setPill('ocr','run');
   let cropURL=''; let processed='';
   try{
-    cropURL = await cropHud(dataURL);
+    cropURL = await cropHud(dataURL);             // smart → fallback to static
     processed = await preprocessForOCR(cropURL);
     imgCrop && (imgCrop.src = processed);
   }catch(e){
