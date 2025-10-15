@@ -149,49 +149,80 @@ async function cropHudStatic(dataURL){
 }
 
 /* Smart HUD finder for high-res photos */
+/* Smart HUD finder (robust against noisy ground) */
 async function cropHudSmart(dataURL){
   const img = await loadImage(dataURL);
   const W = img.naturalWidth, H = img.naturalHeight;
   const isPortrait = H >= W;
 
-  // Scan the bottom 45% of the image for a dark/contrasty HUD band.
-  const fromY = Math.floor(H * 0.55);
+  // Only scan the bottom 38% where the HUD lives
+  const fromFrac = 0.62;                       // was 0.55
+  const fromY = Math.floor(H * fromFrac);
+
   const c = document.createElement('canvas');
   c.width = W; c.height = H - fromY;
   const ctx = c.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(img, 0, -fromY);
 
   const rowStats = [];
-  for (let y = 0; y < c.height; y += 2) { // step 2px for speed
+  // Precompute a global mean to define a sane binarization threshold
+  let globalSum = 0, globalN = 0;
+  for (let y = 0; y < c.height; y += 8) {
     const line = ctx.getImageData(0, y, c.width, 1).data;
-    let s = 0, s2 = 0, n = 0;
+    for (let i = 0; i < line.length; i += 4) {
+      globalSum += (line[i] + line[i+1] + line[i+2]) / 3;
+      globalN++;
+    }
+  }
+  const globalMean = globalSum / Math.max(1, globalN);
+  const BW_T = Math.min(205, Math.max(155, globalMean + 5)); // adaptive-ish threshold
+
+  // Row features: mean brightness, std dev, and binary transition density
+  for (let y = 0; y < c.height; y += 2) {
+    const line = ctx.getImageData(0, y, c.width, 1).data;
+    let s = 0, s2 = 0, n = 0, transitions = 0, prevB = null;
     for (let i = 0; i < line.length; i += 4) {
       const v = (line[i] + line[i+1] + line[i+2]) / 3;
-      s += v; s2 += v * v; n++;
+      s += v; s2 += v*v; n++;
+      const b = v < BW_T ? 1 : 0;
+      if (prevB !== null && b !== prevB) transitions++;
+      prevB = b;
     }
     const mean = s / n;
     const std  = Math.sqrt(Math.max(0, (s2/n) - mean*mean));
-    rowStats.push({ y, mean, std });
+    const transDensity = transitions / Math.max(1, n); // ~0..1
+    rowStats.push({ y, mean, std, transDensity });
   }
 
-  // Heuristic: HUD band tends to be darker and texty (higher std).
-  let y0 = -1;
-  let run = 0;
+  // Heuristic for HUD candidate rows:
+  // - slightly darker than photo
+  // - has text (moderate std)
+  // - not over-textured like gravel (bounded transition density)
+  const okRow = r =>
+    (r.mean < 205) &&
+    (r.std  > 12 && r.std < 60) &&
+    (r.transDensity > 0.02 && r.transDensity < 0.22);
+
+  // Find a sustained run of ok rows
+  let y0 = -1, run = 0, need = 10; // ~20px because we step 2px
   for (let i = 0; i < rowStats.length; i++) {
-    const { mean, std } = rowStats[i];
-    if (mean < 195 && std > 18) run++; else run = 0;
-    if (run >= 6) { y0 = rowStats[i - 5].y; break; }
+    if (okRow(rowStats[i])) { run++; } else { run = 0; }
+    if (run >= need) { y0 = rowStats[i - need + 1].y; break; }
   }
   if (y0 < 0) throw new Error('HUD band not found');
 
-  // Define crop: start a little above detected top, include a safe height
-  const safeTop = Math.max(0, fromY + y0 - Math.floor(H * 0.02));
+  // Prefer bands closer to bottom; if top is too high, anchor near bottom
+  const minTop = Math.floor(H * 0.64);
+  const startTop = Math.max(minTop, fromY + y0 - Math.floor(H * 0.02));
+
+  const safeTop = Math.min(startTop, H - Math.floor(H * 0.20)); // keep room for height
   const safeH   = Math.min(Math.floor(H * (isPortrait ? 0.26 : 0.22)), H - safeTop);
 
-  // Left: keep minimap cut logic but slightly adaptive
+  // Left cropping (respecting minimap)
   const mapCut = isPortrait ? 0.20 : 0.18;
   const padL = isPortrait ? 0.028 : 0.022;
   const padR = isPortrait ? 0.024 : 0.020;
+  const LEFT_RELAX = 0.030; // keep your global, but redeclare if needed here
 
   let sx = Math.floor(W * (mapCut + padL - LEFT_RELAX));
   let sw = W - sx - Math.floor(W * padR);
